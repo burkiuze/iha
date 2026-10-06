@@ -104,6 +104,8 @@ class ReplaySession:
                  "reason": e["data"].get("reason"),
                  "test_statistic": e["data"].get("test_statistic"),
                  "threshold": e["data"].get("threshold"),
+                 "test_statistic_after": e["data"].get("test_statistic_after"),
+                 "threshold_after": e["data"].get("threshold_after"),
                  "sources_used": e["data"].get("sources_used")}
                 for e in self.events_of(EventType.NAV_SOURCE_REJECTED)]
 

@@ -60,7 +60,8 @@ class ExplainabilityQuestionsTest(unittest.TestCase):
         rej = s.nav_rejections()[0]
         self.assertEqual(rej["source"], "GNSS")
         self.assertEqual(rej["reason"], "tutarlilik_testi_dislama")
-        self.assertGreater(rej["test_statistic"], rej["threshold"])
+        self.assertGreater(rej["test_statistic"], rej["threshold"])          # dışlamayı tetikleyen
+        self.assertLessEqual(rej["test_statistic_after"], rej["threshold_after"])  # sonra tutarlı
         self.assertNotIn("GNSS", rej["sources_used"])
         self.assertNotIn("GNSS", s.nav_sources_at(rej["time_s"] + 5.0))
         self.assertIn("GNSS", s.nav_sources_at(30.0))

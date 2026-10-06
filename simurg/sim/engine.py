@@ -333,8 +333,10 @@ class SimulationEngine:
         for s in sorted(set(sol.sources_rejected) - set(prev.sources_rejected)):
             self._pub(EventType.NAV_SOURCE_REJECTED, s, source=s, component=s,
                       reason="tutarlilik_testi_dislama",
-                      test_statistic=None if r is None else round(r.test_statistic, 4),
-                      threshold=None if r is None else round(r.threshold, 4),
+                      test_statistic=None if r is None else round(r.initial_test_statistic, 4),
+                      threshold=None if r is None else round(r.initial_threshold, 4),
+                      test_statistic_after=None if r is None else round(r.test_statistic, 4),
+                      threshold_after=None if r is None else round(r.threshold, 4),
                       sources_used=list(sol.sources_used),
                       protection_level_m=round(sol.protection_level_m, 4))
         if first:

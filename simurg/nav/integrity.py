@@ -49,6 +49,9 @@ class IntegrityResult:
     threshold: float
     protection_level_m: float
     integrity_ok: bool
+    # Dışlamadan ÖNCEKİ tüm-kaynak testi (dışlamayı tetikleyen değerler)
+    initial_test_statistic: float = float("nan")
+    initial_threshold: float = float("nan")
 
 
 def fuse(fixes: list[PositionFix]) -> tuple[np.ndarray, np.ndarray]:
@@ -84,6 +87,7 @@ class IntegrityMonitor:
         x, P = fuse(active)
         T = test_statistic(active, x)
         thr = self._threshold(len(active), d)
+        T0, thr0 = T, thr
 
         while T > thr and len(active) > self.min_sources:
             best = None
@@ -105,4 +109,4 @@ class IntegrityMonitor:
         consistent = T <= thr or len(active) == 1
         ok = consistent and pl <= self.alert_limit_m
         return IntegrityResult(x, P, [f.source for f in active], excluded,
-                               T, thr, pl, ok)
+                               T, thr, pl, ok, T0, thr0)
