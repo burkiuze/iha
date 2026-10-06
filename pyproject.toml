@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "simurg"
+version = "0.1.0"
+description = "SİMURG: kutu kanatlı, kuyruk üstü kalkışlı, hidrojen-hibrit İHA için referans mimari modelleri"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.24"]
+license = { text = "Apache-2.0" }
+
+[tool.setuptools.packages.find]
+include = ["simurg*"]
