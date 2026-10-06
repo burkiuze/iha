@@ -7,4 +7,9 @@ dijital ikiz için "altın model" (golden model) olarak kullanılmak üzere
 tasarlanmıştır.
 """
 
-__version__ = "0.1.0"
+import logging
+
+__version__ = "0.2.0"
+
+# Kütüphane varsayılan olarak terminale yazmaz; uygulama logging'i yapılandırır.
+logging.getLogger(__name__).addHandler(logging.NullHandler())

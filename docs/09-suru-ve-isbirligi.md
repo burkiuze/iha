@@ -54,7 +54,7 @@ uygulama her zaman bu sonuçla karşılaştırılarak test edilir
 
 | Olay | Tepki |
 |---|---|
-| Yeni görev (ör. termal kamera insan izi buldu → "doğrula" görevi) | Yalnızca o görev için yeni teklif turu |
+| Yeni görev (ör. termal kamera bir termal anomali buldu → "doğrula" görevi) | Yalnızca o görev için yeni teklif turu |
 | Araç enerjisi beklenenden hızlı düştü | Rotasının sonundan görev bırakır, diğerleri teklif verir |
 | Araç kayboldu (heartbeat > 10 s) | Tüm görevleri "atanmamış"a döner |
 | Ulaşılamayan görev | Atanmaz, operatöre raporlanır (`test_unreachable_task_left_unassigned`) |
@@ -88,6 +88,9 @@ Bir araç bir "aday" (ör. enkaz altında ısı izi) tespit ettiğinde:
 1. Olay (konum, sınıf, güven, küçük resim) sürüye yayılır.
 2. "Doğrulama" görevi farklı bir açıdan bakabilecek araca atanır.
 3. İki bağımsız gözlemin Bayes füzyonu ile güven eşiği aşılırsa
-   operatöre **yüksek öncelikli** bildirim gider.
-4. Gerekirse en yakın araç, görev bölmesindeki acil yardım paketini
-   bırakmak için ayrı bir görev alır (operatör onayı şart).
+   operatöre **yüksek öncelikli** bildirim gider; müdahale kararı ve
+   saha ekiplerinin yönlendirilmesi insan operatördedir.
+
+> **Durum:** Sürü görev dağıtımı (`simurg/swarm/auction.py`) bağımsız bir
+> referans modeldir; 6-DOF simülasyon çekirdeğine henüz bağlı değildir
+> (**planlanan**).

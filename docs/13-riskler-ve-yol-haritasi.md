@@ -53,15 +53,28 @@ gantt
 | MagNav (küçük İHA'da) | 3 | 4 | 6 |
 | CBBA sürü + röle | 5 | 6 | 7 |
 
-## 4. Bu depodan sonra ilk adımlar
+## 4. Yazılım yol haritası
 
-1. Altın modele **6-DOF uçuş dinamiği** (kutu kanat aero tablosu + pervane
-   modeli) eklemek; RTA'nın kaba tahmin modelini bununla doğrulamak.
-2. Kontrol dağıtıcıya **seyir ve geçiş** etkinlik matrislerini eklemek
-   (`B(V, α)` harmanlama).
-3. Enerji yöneticisine sıcaklık ve yaşlanma etkileri (dijital ikizden
-   gelen parametrelerle).
-4. Dağıtık CBBA uzlaşısının ağ gecikmeli simülasyonu; sonucu
-   `swarm.auction.allocate` ile karşılaştıran test.
-5. Mod makinesinin TLA+ modelini yazıp `TRANSITIONS` tablosundan otomatik
-   üretmek (tek kaynak ilkesi).
+**v0.2'de tamamlananlar** (bkz. [14](14-simulasyon-ve-dijital-ikiz.md)):
+
+- [x] 6-DOF dinamik, değiştirilebilir integratör, analitik + tablo aero arayüzü
+- [x] Rejime bağlı etkinlik `B(V, σ)` ve geçiş koordinatörü (iptal mantığıyla)
+- [x] Eyleyici, sensör, ortam modelleri; zaman tabanlı arıza enjeksiyonu
+- [x] Açıklanabilir RTA kararları, standart FDIR raporları, `NavigationSolution`,
+      `EnergyState`, tek kaynak acil durum kural tablosu
+- [x] Olay yolu, JSON kayıt şeması, tekrar oynatma, metrikler, Monte Carlo, CLI
+- [x] Enerji modeline bozunum kancası (yaşlanma/sıcaklık modelleri için)
+
+**Sıradaki adımlar:**
+
+1. RTA'nın kaba kinematik kestiricisini 6-DOF modeliyle karşılaştırıp
+   muhafazakârlığını ölçmek (kaçırılan/yanlış müdahale oranı).
+2. Geçiş programını tepe gücü (~9 kW) düşürecek şekilde optimize etmek.
+3. İç döngüye INDI; pervane akımının kanat üzerindeki etkisi; hücum açısına
+   bağlı `B(V, α)`.
+4. Tutum kestiricisi (şu an kusursuz varsayılıyor) ve model uyumsuzluğu
+   senaryoları.
+5. Sürü (CBBA) ve mesh ağının simülasyon çekirdeğine bağlanması; dağıtık
+   uzlaşının ağ gecikmeli testi.
+6. Monte Carlo'nun `multiprocessing` ile paralelleştirilmesi.
+7. Mod makinesinin TLA+ modelini `TRANSITIONS` tablosundan otomatik üretmek.

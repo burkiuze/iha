@@ -16,8 +16,12 @@ Eksen ağırlıkları, istek fiziksel olarak karşılanamadığında hangi eksen
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
+from numpy.typing import ArrayLike
+
+from ..core.errors import ConfigurationError
 
 AXES = ("Fz", "Mx", "My", "Mz")
 
@@ -32,17 +36,18 @@ class AllocationResult:
 
 
 class ControlAllocator:
-    def __init__(self, B: np.ndarray, lower: np.ndarray, upper: np.ndarray,
-                 axis_weights=(10.0, 100.0, 100.0, 1.0), tol: float = 1e-3):
+    def __init__(self, B: ArrayLike, lower: ArrayLike, upper: ArrayLike,
+                 axis_weights: tuple[float, ...] = (10.0, 100.0, 100.0, 1.0),
+                 tol: float = 1e-3) -> None:
         self.B = np.asarray(B, dtype=float)
         self.lower = np.asarray(lower, dtype=float)
         self.upper = np.asarray(upper, dtype=float)
         if self.B.shape[1] != self.lower.size or self.lower.size != self.upper.size:
-            raise ValueError("B sütun sayısı ile sınır vektörleri uyuşmuyor")
+            raise ConfigurationError("B sütun sayısı ile sınır vektörleri uyuşmuyor")
         self.Wv = np.diag(axis_weights)
         self.tol = tol
 
-    def allocate(self, v_des, health=None) -> AllocationResult:
+    def allocate(self, v_des: ArrayLike, health: ArrayLike | None = None) -> AllocationResult:
         v_des = np.asarray(v_des, dtype=float)
         n = self.B.shape[1]
         h = np.ones(n) if health is None else np.clip(np.asarray(health, float), 0.0, 1.0)
@@ -72,7 +77,13 @@ class ControlAllocator:
         feasible = bool(np.all(np.abs(err) / scale < self.tol))
         return AllocationResult(u, achieved, err, saturated, feasible)
 
-    def hover_margin(self, weight_n: float, health=None) -> float:
+    @classmethod
+    def from_regime(cls, regime: Any, tol: float = 1e-3) -> "ControlAllocator":
+        """`control.effectiveness.ControlRegime` nesnesinden dağıtıcı kurar."""
+        return cls(regime.B, regime.lower, regime.upper,
+                   axis_weights=tuple(regime.axis_weights), tol=tol)
+
+    def hover_margin(self, weight_n: float, health: ArrayLike | None = None) -> float:
         """Sıfır moment altında üretilebilecek azami itkinin ağırlığa oranı.
 
         İkili arama ile hesaplanır; > 1 ise araç hover yapabilir.
@@ -85,3 +96,23 @@ class ControlAllocator:
             else:
                 hi = mid
         return lo / weight_n
+
+
+class ScheduledAllocator:
+    """Rejime bağlı etkinlik sağlayıcısıyla çalışan dağıtıcı.
+
+    Her çağrıda sağlayıcıdan güncel B(V, σ) alınır ve RPI çözümü aynı
+    `ControlAllocator` mantığıyla yapılır; böylece askı davranışı mevcut
+    API ile birebir aynıdır.
+    """
+
+    def __init__(self, provider: Any, tol: float = 1e-3) -> None:
+        self.provider = provider
+        self.tol = tol
+        self.last_regime = None
+
+    def allocate(self, v_des: ArrayLike, health: ArrayLike | None = None,
+                 conditions: Any = None) -> AllocationResult:
+        regime = self.provider.regime(conditions)
+        self.last_regime = regime
+        return ControlAllocator.from_regime(regime, self.tol).allocate(v_des, health)

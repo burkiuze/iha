@@ -28,6 +28,12 @@ Askı (hover) çerçevesi:
                                        8 motor + 4 elevon komutu
 ```
 
+> **Uygulama durumu (v0.2):** Simülasyon çekirdeği basit bir kuaterniyon
+> PD + kademeli itki yasası kullanır (`simurg/control/flight_controller.py`,
+> araştırma amaçlı, gerçek araç kazancı değildir). INDI **planlanandır**.
+> Rejime bağlı etkinlik `B(V, σ)` ve geçiş koordinatörü uygulanmıştır
+> (`simurg/control/effectiveness.py`, `simurg/control/transition.py`).
+
 ### 2.1 Neden INDI?
 **Artımlı doğrusal olmayan dinamik ters çevirme (INDI)**, modelin çoğunu
 ölçülen açısal ivmeyle değiştirir; yalnızca eyleyici etkinliğini (B

@@ -111,6 +111,17 @@ yazılımının (C ve Rust) her sürümü, aynı test vektörleriyle altın mode
 | `nav/integrity.py` | P2 | `nav_raim.c` | `simurg-nav` |
 | `power/energy_manager.py` | P4 | `pwr_ems.c` | `simurg-ems` |
 | `swarm/auction.py` | Görev bilgisayarı | — | — |
+| `control/effectiveness.py` | P1 | `ctl_eff.c` | `simurg-alloc` |
+| `control/transition.py` | P1 | `ctl_trans.c` | `simurg-trans` |
+| `nav/providers.py` | P2 | `nav_sys.c` | `simurg-nav` |
+
+### 4.2 Simülasyon ve dijital ikiz katmanı (v0.2)
+
+`simurg/core` (ortak tipler, olay yolu, hatalar, yapılandırma) hiçbir
+modüle bağlı değildir; alan modülleri yalnızca `core`'a, `simurg/sim`
+hepsine bağlıdır. Böylece alan modülleri uçuş yazılımına aktarılırken
+simülasyon koduna bağımlılık taşınmaz. Ayrıntı:
+[14-simulasyon-ve-dijital-ikiz.md](14-simulasyon-ve-dijital-ikiz.md).
 
 ### 4.1 Uçuş kodu için kodlama kuralları
 - Dinamik bellek yok (başlangıç sonrası), özyineleme yok, sınırlı döngüler.

@@ -77,12 +77,27 @@ flowchart LR
 > suçlayabilir. Alt küme tutarlılığı bu "maskelenme" etkisine karşı daha
 > sağlamdır.
 
-### 4.1 Sahtecilik senaryosu (test)
+### 4.1 Hatalı GNSS kaynağı senaryosu (test)
 `test_nav.test_gnss_spoof_excluded`: GNSS'e (180, −120) m kaydırma
 eklenir. GNSS'in küçük kovaryansı (3 m) nedeniyle naif füzyon sonucu
 GNSS'e çekilir ve test istatistiği büyük çıkar. FDE GNSS'i dışlar;
 kalan VIO + TRN + MagNav ile hata < 30 m, PL ≈ 36 m < 50 m → bütünlük
 korunur, görev sürer, operatöre "GNSS dışlandı" bildirilir.
+
+### 4.2 Sağlayıcılar ve `NavigationSolution` (v0.2)
+
+Her kaynak bağımsız bir `NavigationProvider`'dır (`simurg/nav/providers.py`).
+`NavigationSystem` artık ham konum yerine `core.types.NavigationSolution`
+döndürür: konum, hız, güven, koruma seviyesi, kullanılan / dışlanan /
+kullanılamayan kaynaklar, bütünlük bayrağı, zaman damgası.
+
+- Bütünlük için **en az 2 bağımsız kaynak** gerekir; tek kaynakla çözüm
+  üretilir ama `integrity_ok = False` (çapraz denetim yok).
+- Hiç kaynak yoksa son güvenilir çözüm hızla ilerletilir (ataletsel
+  ilerletme); koruma seviyesi zamanla büyür.
+
+Kapsam yalnızca bozulmuş ya da kullanılamayan kaynakların tespiti, güvenli
+geri dönüş ve bütünlük izlemedir.
 
 ## 5. Bütünlük kaybında davranış
 

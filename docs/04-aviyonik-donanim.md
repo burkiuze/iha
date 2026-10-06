@@ -86,7 +86,7 @@ Zaman tetiklemeli çizelge (4 ms ana çevrim, 250 Hz):
 ## 4. Görev bilgisayarı
 
 - Gömülü GPU'lu modül (~100 TOPS sınıfı), **uçuş-kritik değildir**.
-- Görev: algılama (insan, ısı izi, duman), VIO, TRN harita eşleme, görev
+- Görev: algılama (termal anomali, duman, yapısal hasar), VIO, TRN harita eşleme, görev
   planlama, sürü yazılımı.
 - FCC'lere yalnızca **öneri** (setpoint, rota) gönderir; bu öneriler
   RTA'dan geçer. Görev bilgisayarı tamamen çökse bile araç güvenli uçar.
@@ -104,9 +104,10 @@ Takıldığında FCC veri sayfasını okur, imzayı doğrular, kütle/AM'yi uçu
 kontrol modeline, güç profilini enerji yöneticisine, sürükleme artışını
 performans modeline otomatik işler. İmza geçersizse bölme **güçlendirilmez**.
 
-Örnek bölmeler: EO/IR gimbal, çok spektrumlu kamera, gaz algılayıcı
-"burun", LTE/mesh röle istasyonu, 2 kg acil yardım paketi bırakma
-mekanizması (ilk yardım kiti, telsiz, termal battaniye).
+Örnek bölmeler: EO/IR gözlem kamerası (afet ve hasar tespiti), çok
+spektrumlu kamera (çevre izleme), gaz algılayıcı "burun" (yangın/sızıntı
+izleme), LTE/mesh haberleşme röle istasyonu. Yük bırakma mekanizması
+kapsam dışıdır.
 
 ## 6. Uçuş sonlandırma sistemi (FTS)
 

@@ -77,7 +77,7 @@ ile uzun süre loiter eden bir İHA'da indüklenmiş sürükleme toplamın
 | Disk yüklemesi | 235 N/m² |
 | İdeal güç | T^1,5 / √(2ρA) ≈ 2,40 kW |
 | Figure of merit | ~0,65 |
-| **Askı bara gücü** | **≈ 3,7–3,8 kW** |
+| **Askı bara gücü** | **≈ 3,7–3,8 kW** (el hesabı; 6-DOF simülasyonu ≈ 4,3 kW ölçtü, bkz. [14](14-simulasyon-ve-dijital-ikiz.md) §11) |
 | Nominal itki/ağırlık | 1,61 (`hover_margin`) |
 | Tek motor arızasıyla itki/ağırlık | 1,20 (dış) / 1,32 (iç) |
 

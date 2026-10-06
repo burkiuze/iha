@@ -85,19 +85,30 @@ kılar.
 
 ## 3. Acil durum yöneticisi
 
-Öncelik sırası (yüksekten düşüğe):
+Kural tablosu kodda **tek doğruluk kaynağıdır**:
+`simurg/modes/flight_modes.py::CONTINGENCY_RULES`. Aşağıdaki tablo bu
+listeyle `tests/test_mode_integration.py::test_docs_table_matches_code`
+tarafından otomatik karşılaştırılır; sıra veya tetikleyici kimliği
+değişirse test başarısız olur.
 
-| # | Koşul | Aksiyon | Gerekçe |
-|---|---|---|---|
-| 1 | Araç kontrol edilemiyor (dağıtıcı roll/pitch'i karşılayamıyor, tüm FCC kaybı) | **PARACHUTE** | Yerdeki insanları koru |
-| 2 | Hover mümkün değil **veya** iniş enerjisi yok | **EMERGENCY_LAND** (sabit kanatla, güvenli alana süzülerek / göbek üstü) | Dikey iniş denenirse kontrol kaybı |
-| 3 | Eve dönüş enerjisi yok | **EMERGENCY_LAND** (en yakın önceden onaylı alan) | |
-| 4 | Navigasyon bütünlüğü kaybı | **LOITER_HOLD** | Yanlış konuma dönmek yerine dur ve düşün |
-| 5 | C2 bağlantısı > 30 s yok | **RETURN** | Standart kayıp-link prosedürü |
+Öncelik sırası (yüksekten düşüğe; ilk eşleşen kural karardır):
 
-Not: 4 ve 5 aynı anda olursa araç **önce durur** (LOITER_HOLD); bütünlük
-geri gelmeden eve dönmeye çalışmaz. Bu, GNSS sahteciliği + karıştırma
-kombinasyonuna karşı bilinçli bir tercihtir (yanlış "ev"e gitmemek).
+| # | Tetikleyici | Koşul | Aksiyon | Gerekçe |
+|---|---|---|---|---|
+| 1 | `kontrol_kaybi` | Araç kontrol edilemiyor (2 s boyunca tutum hatası > 60° ya da dağıtıcının tutum momentlerini karşılayamaması; tüm FCC kaybı) | **PARACHUTE** | Yerdeki insanları koru |
+| 2 | `enerji_veya_hover_yok` | Hover mümkün değil **veya** iniş enerjisi yok | **EMERGENCY_LAND** (hover varsa dikey, yoksa sabit kanatla alçalarak) | Dikey iniş denenirse kontrol kaybı |
+| 3 | `eve_donus_enerjisi_yok` | Eve dönüş enerjisi yok | **EMERGENCY_LAND** (en yakın güvenli alan) | |
+| 4 | `nav_butunluk_kaybi` | Navigasyon bütünlüğü kaybı (seyir/görev/dönüşte) | **LOITER_HOLD** | Yanlış konuma dönmek yerine dur ve düşün |
+| 5 | `baglanti_kaybi_nav_yok` | LOITER_HOLD'da bağlantı > 30 s yok **ve** nav bütünlüğü yok | bekle (mod değişmez) | Bütünlük olmadan "ev" yönü güvenilmez |
+| 6 | `baglanti_kaybi` | C2 bağlantısı > 30 s yok | **RETURN** | Standart kayıp-link prosedürü |
+
+Not: 4 ve 6 aynı anda olursa araç **önce durur** (LOITER_HOLD); bütünlük
+geri gelmeden eve dönmeye çalışmaz (kural 5). Bu, kaynak bozulması ve
+bağlantı kaybının birlikte görüldüğü durumlara karşı bilinçli bir tercihtir.
+
+Her karar `ContingencyDecision` nesnesi olarak üretilir (istenen mod,
+gerekçe, öncelik, tetikleyici, kabul edildi mi) ve simülasyonda
+`contingency` olayı olarak kaydedilir.
 
 ## 4. FDIR
 

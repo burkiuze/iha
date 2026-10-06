@@ -43,7 +43,7 @@ FTS ve paraşüt **tamamen bağımsız** kendi LiFePO₄ hücreleriyle çalış�
 |---|---|---|
 | PEM yakıt hücresi | 800 W sürekli, hava soğutmalı, ~1,3 kg (BoP dahil) | Ortalama yük + batarya şarjı |
 | H₂ depolama | 6,8 L Tip-IV kompozit, 300 bar, 139 g H₂ = 4,63 kWh kimyasal | Ana enerji |
-| Li-ion batarya | 12S2P 21700 (yüksek güç), 44,4 V, 389 Wh, 3,6 kW deşarj | Askı tepe yükü, orta frekans, son rezerv |
+| Li-ion batarya | 12S2P 21700 (yüksek güç), 44,4 V, 389 Wh, 6 kW tepe deşarj (ilk taslakta 3,6 kW; bkz. not) | Askı/geçiş tepe yükü, orta frekans, son rezerv |
 | Süperkapasitör | 6 Wh, 2,5 kW | Rüzgâr hamlesi, motor arızası sonrası itki sıçraması |
 | Güneş | ~0,8 m² ince film (kanat üst yüzeyleri), gündüz ort. ~70–90 W | Aviyonik yükünün büyük kısmı |
 
@@ -97,6 +97,12 @@ dönebilir = E_kullanılabilir ≥ E_gerekli
 `V_yer` rüzgâr kestirimiyle güncellenir (karşı rüzgârda düşer). Bu
 bayrak düştüğü an ContingencyManager uygun aksiyonu seçer.
 
+> **Simülasyon notu (v0.2):** 6-DOF dijital ikiz ([14](14-simulasyon-ve-dijital-ikiz.md)
+> §11) kararlı askıda ~4,3 kW, ileri geçişte ~9 kW tepe bara yükü ölçtü.
+> 3,6 kW batarya sınırı yakıt hücresi olmadan geçişi karşılayamadığı için
+> referans modelde batarya tepe deşarjı 6 kW'a çıkarıldı (sentetik değer;
+> hücre seçimi tezgâh testi gerektirir).
+
 ## 4. İtki
 
 | Bileşen | Seçim |
@@ -120,6 +126,8 @@ otomatik telafi edilir; operatör yalnızca bilgilendirilir.
   tahliye kanalı.
 - Bölmede 2 adet H₂ sensörü; %1 (LEL'in %25'i) konsantrasyonda
   solenoid kapanır, FC durur, araç batarya ile eve döner.
-- Yerde dolum: yalnızca kuru azot ile basınç testi yapılmış hat; dolum
-  sırasında aviyonik kapalı ve topraklı.
+- Hidrojen sisteminin fiziksel kurulumu, basınçlandırılması ve dolumu
+  bu deponun **kapsamı dışındadır**; ilgili standart ve yetkili kuruluş
+  prosedürlerine tabidir. Depo yalnızca enerji davranışının simülasyon
+  modelini içerir.
 - Paraşüt açılımı veya kaza algısında (≥ 8 g) solenoid otomatik kapanır.

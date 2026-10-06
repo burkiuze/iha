@@ -21,7 +21,7 @@ afet bölgesinde geçici haberleşme rölesi.
 | Seyirde ölü ağırlık | — | 4 dikey motor + kollar (~%15–20 MTOW) | Yok | **Yok** — aynı motorlar hem askı hem seyir |
 | Kanat | Yok | Tek kanat + kuyruk | Tek kanat + kuyruk | **Kutu kanat**: ~%31 daha az indüklenmiş sürükleme, kuyruksuz |
 | Enerji | Li-Po | Li-Po veya benzin | Benzin / Li-Po | **H₂ PEM + Li-ion + süperkap + güneş**, frekans ayrıştırmalı yönetim |
-| Dayanım | 20–40 dk | 1–3 sa | 2–10 sa | **~3,3 sa (H₂) + ~0,4 sa batarya; gündüz güneşle ~4 sa+** |
+| Dayanım | 20–40 dk | 1–3 sa | 2–10 sa | **Hedef:** ~3,3 sa (H₂) + ~0,4 sa batarya; gündüz güneşle ~4 sa+ (yalnız enerji modeliyle hesaplandı) |
 | Motor arızası | Okto hariç genelde düşüş | Seyirde tolere, askıda kritik | Tek motor → süzülme | **Askıda herhangi tek motor arızası tolere** (hover marjı ≥ 1,2) |
 | Uçuş bilgisayarı | Tek | Tek / çift (aynı) | Tek / çift | **Üçlü, farklı mimarili (dissimilar)**: ARM+C, RISC-V+Rust, FPGA monitör |
 | Navigasyon | GNSS + IMU | GNSS + IMU | GNSS + IMU | **GNSS + VIO + TRN + MagNav + göksel**; RAIM benzeri hata dışlama |
@@ -130,3 +130,4 @@ flowchart TB
 | 11 | [Yer segmenti ve dijital ikiz](11-yer-segmenti-ve-dijital-ikiz.md) | GCS, ikiz, bakım |
 | 12 | [Doğrulama ve sertifikasyon](12-dogrulama-ve-sertifikasyon.md) | Test piramidi, SORA, DO-178C |
 | 13 | [Riskler ve yol haritası](13-riskler-ve-yol-haritasi.md) | Teknik riskler, fazlar |
+| 14 | [Simülasyon ve dijital ikiz](14-simulasyon-ve-dijital-ikiz.md) | 6-DOF çekirdek, senaryolar, arıza enjeksiyonu, kayıt, Monte Carlo |

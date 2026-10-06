@@ -24,7 +24,19 @@
 (bkz. [01-gereksinimler.md](01-gereksinimler.md) "Kod" sütunu). Yeni bir
 gereksinim testi olmadan "tamamlandı" sayılmaz.
 
-### 1.2 Monte Carlo SIL kampanyası (plan)
+### 1.2 Monte Carlo SIL kampanyası
+
+**Altyapı uygulandı (v0.2):** `simurg/sim/montecarlo.py` — koşu başına
+tohum kaydı, yalnızca tohumla yeniden üretim, parametre dağılımları,
+metrik dağılım özeti. Aşağıdaki kampanya ölçeği ve kabul ölçütleri
+hedeftir (**planlanan**); şu anki 6-DOF modeli sentetik katsayılarla
+çalıştığı için sonuçlar yazılım mantığının doğrulanması içindir, araç
+performansının değil.
+
+```bash
+python -m simurg.sim montecarlo combined_degraded --runs 20 --seed 0 --wind 6
+```
+
 Her sürüm için ≥ 10 000 koşu, rastgele değişkenler:
 - Rüzgâr (ortalama 0–15 m/s, Dryden türbülansı, hamleler),
 - Kütle ±%10, AM ±2 cm,
@@ -72,7 +84,11 @@ analizle birleştirilerek), acil durum kararlarının %100'ü tablodaki
 | Taktik hava riski azaltma | DAA (ADS-B, FLARM, akustik, görsel), Remote ID |
 | Muhafaza (containment) | İki kademeli geofence, bağımsız FTS |
 
-## 4. Uçuş testi programı
+## 4. Uçuş testi programı (planlanan; bu deponun kapsamı dışında)
+
+> Bu depo yalnızca yazılım simülasyonu ve referans modelleri içerir.
+> Aşağıdaki tablo, gelecekte yetkili bir test kuruluşu tarafından
+> ayrıntılandırılacak kavramsal bir faz planıdır; uçuş prosedürü değildir.
 
 | Faz | İçerik | Çıkış ölçütü |
 |---|---|---|

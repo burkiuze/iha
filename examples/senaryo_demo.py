@@ -1,8 +1,11 @@
-"""Uçtan uca senaryo: arama-kurtarma görevi sırasında üst üste gelen arızalar.
+"""v0.1 bileşen demosu: arama-kurtarma görevi sırasında üst üste gelen arızalar.
+
+Not: Bu demo bileşenleri elle ve kinematik olarak bağlar (fizik yok). 6-DOF
+kapalı döngü simülasyon için bkz. examples/simulation_demo.py.
 
   t=0     VTOL kalkış, geçiş, seyir
   t=600   M2U pervanesi kuş çarpması sonucu hasar görür (%10 devir kaybı)
-  t=900   GNSS sahteciliği başlar (~220 m kaydırma)
+  t=900   GNSS hatalı konum vermeye başlar (~220 m sapma) -> tespit ve dışlama
   t=1200  Otonom planlayıcı geofence'e doğru dik bir dönüş ister
   t=1500  M2U tamamen durur -> hover marjı yeniden hesaplanır
   t=1700  Komuta-kontrol bağlantısı kopar -> 30 s sonra otomatik eve dönüş
@@ -74,8 +77,8 @@ def main():
             rpm[1] = 0.0
         h_motor = fdir.update(rpm_cmd, rpm)
 
-        spoof = np.array([180.0, 130.0]) if t >= 900 else np.zeros(2)
-        fixes = [PositionFix("GNSS", truth + rng.normal(0, 3, 2) + spoof, np.eye(2) * 9),
+        gnss_bias = np.array([180.0, 130.0]) if t >= 900 else np.zeros(2)
+        fixes = [PositionFix("GNSS", truth + rng.normal(0, 3, 2) + gnss_bias, np.eye(2) * 9),
                  PositionFix("VIO", truth + rng.normal(0, 8, 2), np.eye(2) * 64),
                  PositionFix("TRN", truth + rng.normal(0, 15, 2), np.eye(2) * 225),
                  PositionFix("MAGNAV", truth + rng.normal(0, 25, 2), np.eye(2) * 625)]

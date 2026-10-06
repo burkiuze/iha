@@ -62,7 +62,7 @@ def route_reward(agent: Agent, route: list[Task], tau_s: float) -> float:
     return total
 
 
-def allocate(agents: list[Agent], tasks: list[Task], base,
+def allocate(agents: list[Agent], tasks: list[Task], base: np.ndarray,
              tau_s: float = 3600.0) -> dict[str, list[str]]:
     base = np.asarray(base, float)
     by_id = {t.id: t for t in tasks}

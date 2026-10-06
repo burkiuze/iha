@@ -71,11 +71,25 @@ altın modelin çıktıları karşılaştırılır. Fark → yazılım hatası v
 hatası; her iki durumda da mühendislik kaydı açılır. Bu, sahada çalışan
 **sürekli back-to-back testtir**.
 
+### 2.4 Uygulama durumu (v0.2)
+
+| Yetenek | Durum | Kod |
+|---|---|---|
+| 6-DOF dijital ikiz çekirdeği | **var** (sentetik katsayılar) | `simurg/sim/engine.py` |
+| Yapılandırılmış uçuş kaydı (JSON şeması) | **var** | `simurg/sim/recorder.py` |
+| Uçuş tekrar oynatma ve ne-olurdu analizi | **prototip** (Python API, görsel arayüz yok) | `simurg/sim/replay.py` |
+| Senaryo + arıza takvimi ile "sanal prova" | **prototip** | `simurg/sim/scenario.py`, `simurg/sim/scenarios.py` |
+| Araca özgü parametre öğrenimi | **planlanan** | — |
+| Kestirimci bakım | **planlanan** | — |
+| GCS arayüzü | **planlanan** | — |
+
+Ayrıntı: [14-simulasyon-ve-dijital-ikiz.md](14-simulasyon-ve-dijital-ikiz.md).
+
 ## 3. Lojistik
 
 | Konu | Değer |
 |---|---|
 | Kurulum (kutudan uçuşa) | 2 kişi, ≤ 15 dk |
 | Sortiler arası dönüş | H₂ tank değişimi (hızlı bağlantı) + batarya kontrolü: ≤ 5 dk |
-| H₂ tedariki | Sahada 2 × 50 L / 450 bar depolama silindiri ile kompresörsüz kademeli (cascade) dolum ≈ 8–10 tank; veya dolu tank değişimi |
+| H₂ tedariki | Kapsam dışı (lojistik ve dolum, yetkili tedarikçi prosedürlerine tabidir); konsept olarak dolu tank değişimi varsayılır |
 | Bakım aralığı | Kestirimci; asgari her 100 uçuş saatinde görsel + yapısal kontrol |

@@ -14,11 +14,23 @@ Frekans ayrıştırmalı strateji:
 
 Tüm güçler DC bara (bus) tarafında, watt cinsindendir; pozitif = baraya
 güç verir (deşarj), negatif = baradan güç çeker (şarj).
+
+Bu bir simülasyon modelidir: hidrojen sisteminin fiziksel kurulumu,
+basınçlandırılması ya da dolumu bu deponun kapsamı dışındadır.
+
+Bozunum (yaşlanma, sıcaklık, arıza) üç ölçek katsayısıyla temsil edilir:
+`fc_power_scale`, `batt_capacity_scale`, `batt_discharge_scale`,
+`sc_power_scale` (1 = nominal).
+İsteğe bağlı bir `EnergyDegradationModel` her adımda bunları güncelleyebilir
+(bağımlılık enjeksiyonu); arıza enjeksiyonu da aynı katsayıları kullanır.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Protocol
+
+from ..core.types import EnergyState
 
 H2_LHV_WH_PER_KG = 33_330.0
 
@@ -30,7 +42,10 @@ class PowerConfig:
     fc_filter_tau_s: float = 20.0
     h2_mass_kg: float = 0.139               # 6.8 L, 300 bar
     batt_capacity_wh: float = 389.0         # 12S2P 21700
-    batt_max_discharge_w: float = 3_600.0
+    # Tepe (burst) deşarj. 6-DOF simülasyonu ileri geçişte ~7-8 kW tepe elektrik
+    # gücü gösterdi; ilk tasarımdaki 3,6 kW sınırı yakıt hücresi olmadan bunu
+    # karşılayamıyordu (bkz. docs/14 "Bulgular"). Değer sentetiktir.
+    batt_max_discharge_w: float = 6_000.0
     batt_max_charge_w: float = 600.0
     batt_slew_w_per_s: float = 4_000.0
     batt_efficiency: float = 0.97
@@ -67,9 +82,16 @@ class PowerSplit:
                 + self.sc_w + self.unmet_w - self.load_w)
 
 
+class EnergyDegradationModel(Protocol):
+    """Sıcaklık/yaşlanma gibi modeller için kanca (ör. her adımda ölçekleri günceller)."""
+
+    def update(self, manager: "EnergyManager", dt: float) -> None: ...
+
+
 @dataclass
 class EnergyManager:
     cfg: PowerConfig = field(default_factory=PowerConfig)
+    degradation: EnergyDegradationModel | None = None
 
     def __post_init__(self):
         c = self.cfg
@@ -79,14 +101,29 @@ class EnergyManager:
         self.fc_w = 0.0
         self.batt_w = 0.0
         self._demand_lp = 0.0
+        self.fc_power_scale = 1.0
+        self.batt_capacity_scale = 1.0
+        self.batt_discharge_scale = 1.0
+        self.sc_power_scale = 1.0
+        self.last_split: PowerSplit | None = None
+
+    # ---- etkin sınırlar ----------------------------------------------------
+    @property
+    def fc_max_w(self) -> float:
+        return self.cfg.fc_max_w * self.fc_power_scale
+
+    @property
+    def batt_capacity_wh(self) -> float:
+        return self.cfg.batt_capacity_wh * self.batt_capacity_scale
 
     # ---- yardımcılar -------------------------------------------------
     def _batt_limits(self, dt: float, allow_reserve: bool) -> tuple[float, float]:
         c = self.cfg
         floor = 0.0 if allow_reserve else c.batt_soc_reserve
-        e_avail = max(self.batt_soc - floor, 0.0) * c.batt_capacity_wh
-        e_room = max(1.0 - self.batt_soc, 0.0) * c.batt_capacity_wh
-        p_dis = min(c.batt_max_discharge_w, e_avail * 3600.0 / dt * c.batt_efficiency)
+        e_avail = max(self.batt_soc - floor, 0.0) * self.batt_capacity_wh
+        e_room = max(1.0 - self.batt_soc, 0.0) * self.batt_capacity_wh
+        p_dis = min(c.batt_max_discharge_w * self.batt_discharge_scale,
+                    e_avail * 3600.0 / dt * c.batt_efficiency)
         p_chg = min(c.batt_max_charge_w, e_room * 3600.0 / dt / c.batt_efficiency)
         return -p_chg, p_dis
 
@@ -94,13 +131,17 @@ class EnergyManager:
         c = self.cfg
         e = self.sc_soc * c.sc_capacity_wh
         room = (1.0 - self.sc_soc) * c.sc_capacity_wh
-        return (-min(c.sc_max_w, room * 3600.0 / dt),
-                min(c.sc_max_w, e * 3600.0 / dt))
+        p_max = c.sc_max_w * self.sc_power_scale
+        return (-min(p_max, room * 3600.0 / dt),
+                min(p_max, e * 3600.0 / dt))
 
     # ---- ana adım ------------------------------------------------------
     def step(self, dt: float, load_w: float, solar_w: float = 0.0,
              emergency: bool = False) -> PowerSplit:
         c = self.cfg
+        if self.degradation is not None:
+            self.degradation.update(self, dt)
+        fc_max = self.fc_max_w
         net = load_w - solar_w
         curtailed = 0.0
 
@@ -108,11 +149,12 @@ class EnergyManager:
         a = dt / (c.fc_filter_tau_s + dt)
         self._demand_lp += a * (net - self._demand_lp)
         fc_target = self._demand_lp + c.soc_gain_w * (c.batt_soc_target - self.batt_soc)
-        fc_target = min(max(fc_target, 0.0), c.fc_max_w)
+        fc_target = min(max(fc_target, 0.0), fc_max)
         if self.h2_wh <= 0.0:
             fc_target = 0.0
         step_lim = c.fc_slew_w_per_s * dt
         self.fc_w += min(max(fc_target - self.fc_w, -step_lim), step_lim)
+        self.fc_w = min(self.fc_w, fc_max)     # ani bozunumda sınır hemen uygulanır
         fc = self.fc_w
 
         # 2) Kalan: batarya (eğim sınırlı) + süperkap (hızlı bileşen)
@@ -138,10 +180,11 @@ class EnergyManager:
 
         # 4) Durum güncelle
         hrs = dt / 3600.0
+        cap = self.batt_capacity_wh
         if batt >= 0:
-            self.batt_soc -= batt / c.batt_efficiency * hrs / c.batt_capacity_wh
+            self.batt_soc -= batt / c.batt_efficiency * hrs / cap
         else:
-            self.batt_soc -= batt * c.batt_efficiency * hrs / c.batt_capacity_wh
+            self.batt_soc -= batt * c.batt_efficiency * hrs / cap
         self.sc_soc -= sc * hrs / c.sc_capacity_wh
         if fc > 0:
             self.h2_wh = max(self.h2_wh - fc / fc_efficiency(fc, c.fc_max_w) * hrs, 0.0)
@@ -149,15 +192,41 @@ class EnergyManager:
         self.batt_soc = min(max(self.batt_soc, 0.0), 1.0)
         self.sc_soc = min(max(self.sc_soc, 0.0), 1.0)
 
-        return PowerSplit(load_w, solar_w, fc, batt, sc, curtailed, unmet)
+        self.last_split = PowerSplit(load_w, solar_w, fc, batt, sc, curtailed, unmet)
+        return self.last_split
 
     # ---- görev seviyesi sorgular --------------------------------------
     def usable_energy_wh(self, include_reserve: bool = False) -> float:
         c = self.cfg
         floor = 0.0 if include_reserve else c.batt_soc_reserve
-        batt = max(self.batt_soc - floor, 0.0) * c.batt_capacity_wh * c.batt_efficiency
-        fc = self.h2_wh * fc_efficiency(c.fc_max_w * 0.7, c.fc_max_w)
+        batt = max(self.batt_soc - floor, 0.0) * self.batt_capacity_wh * c.batt_efficiency
+        fc = self.h2_wh * fc_efficiency(c.fc_max_w * 0.7, c.fc_max_w) if self.fc_power_scale > 0 else 0.0
         return batt + fc
+
+    def reserve_energy_wh(self) -> float:
+        c = self.cfg
+        return min(self.batt_soc, c.batt_soc_reserve) * self.batt_capacity_wh * c.batt_efficiency
+
+    @property
+    def health(self) -> float:
+        return min(self.fc_power_scale, self.batt_capacity_scale, self.batt_discharge_scale,
+                   self.sc_power_scale)
+
+    def state(self) -> EnergyState:
+        """Ortak `EnergyState` (SI: J, W)."""
+        sp = self.last_split
+        return EnergyState(
+            available_energy_j=self.usable_energy_wh() * 3600.0,
+            reserve_energy_j=self.reserve_energy_wh() * 3600.0,
+            battery_soc=self.batt_soc,
+            fuel_cell_power_w=self.fc_w,
+            fuel_cell_available=self.h2_wh > 0 and self.fc_power_scale > 0,
+            hydrogen_energy_j=self.h2_wh * 3600.0,
+            supercap_soc=self.sc_soc,
+            solar_input_w=0.0 if sp is None else sp.solar_w,
+            power_demand_w=0.0 if sp is None else sp.load_w,
+            unmet_power_w=0.0 if sp is None else sp.unmet_w,
+            health=self.health)
 
     def return_home_feasible(self, distance_m: float, groundspeed_mps: float,
                              cruise_power_w: float, landing_energy_wh: float = 60.0,
