@@ -10,6 +10,9 @@ bağımsız bir `NavigationProvider`'dır. `NavigationSystem`:
   4. Hiç kaynak yoksa son güvenilir çözümü hız ile ilerletir (ataletsel
      ilerletme); koruma seviyesi zamanla büyür, integrity_ok=False.
 
+Fail-safe: "geçerli" işaretli ama sonlu olmayan (NaN/Inf) ölçüm kullanılmaz,
+kullanılamayan kaynak sayılır. Hiç çözüm yokken bütünlük asla varsayılmaz.
+
 Kapsam: bozulmuş ya da kullanılamayan kaynağın tespiti, güvenli geri dönüş
 ve bütünlük izleme. Sinyal üretimi/aldatma teknikleri kapsam dışıdır.
 """
@@ -22,7 +25,7 @@ from typing import Protocol
 import numpy as np
 
 from ..core.types import NavigationSolution, SensorMeasurement
-from .integrity import IntegrityMonitor, PositionFix
+from .integrity import IntegrityMonitor, IntegrityResult, PositionFix
 
 
 class NavigationProvider(Protocol):
@@ -40,6 +43,7 @@ class NavigationSystem:
 
     def __post_init__(self) -> None:
         self.last: NavigationSolution | None = None
+        self.last_integrity: IntegrityResult | None = None   # açıklanabilirlik için
         self._last_fix_t: float | None = None
         self._last_fix_pl = 0.0
 
@@ -47,7 +51,8 @@ class NavigationSystem:
         fixes, unavailable = [], []
         for p in self.providers:
             m = p.provide(t)
-            if m is None or not m.valid:
+            if m is None or not m.valid or not (np.all(np.isfinite(m.value))
+                                                 and np.all(np.isfinite(m.covariance))):
                 unavailable.append(p.source_id)
             else:
                 fixes.append(PositionFix(p.source_id, np.asarray(m.value, float),
@@ -56,16 +61,19 @@ class NavigationSystem:
         vel = np.asarray(velocity_ned, float)
         if len(fixes) >= self.min_sources_for_integrity:
             r = self.monitor.evaluate(fixes)
+            self.last_integrity = r
             ne, pl, ok = r.position, r.protection_level_m, r.integrity_ok
             used, rejected = tuple(r.used), tuple(r.excluded)
             self._last_fix_t, self._last_fix_pl = t, pl
         elif len(fixes) == 1:
+            self.last_integrity = None
             f = fixes[0]
             ne = f.pos
             pl = float(5.45 * np.sqrt(np.max(np.linalg.eigvalsh(f.cov))))
             ok, used, rejected = False, (f.source,), ()
             self._last_fix_t, self._last_fix_pl = t, pl
         else:
+            self.last_integrity = None
             if self.last is None:
                 ne, pl = np.zeros(2), float("inf")
             else:

@@ -18,6 +18,20 @@ Modüler yapı:
   SafetyEnvelope (= Envelope) -> ihlal listesi
   RuntimeAssurance.decide()  -> SafetyDecision (açıklanabilir meta veri)
   RuntimeAssurance.select()  -> (Command, Source)  [geriye dönük uyumlu]
+  ValidatedCommand           -> yalnızca RuntimeAssurance'ın üretebildiği,
+                                kontrol katmanının kabul ettiği tek komut tipi
+
+Mimari değişmez (AI yetki sınırı):
+
+    Gelişmiş kontrolcü / YZ  --öneri (Command)-->  RuntimeAssurance
+        --ValidatedCommand-->  Kontrol soyutlaması (VehicleController)
+        --> Kontrol dağıtımı --> Eyleyiciler
+
+Gelişmiş kontrolcünün eyleyicilere ya da kontrol katmanına doğrudan yolu
+yoktur: kontrol katmanı ham `Command` kabul etmez (SafetyInvariantError).
+
+Fail-safe: zarf denetiminde sonlu olmayan (NaN/Inf) bir değer "güvenli"
+sayılmaz; `gecersiz_durum` ihlali üretir (sert zarfta kilit).
 
 Kapsam: zarf sabit kanat rejimi için tanımlıdır (seyir, görev, dönüş,
 bekleme). Askı ve geçişte RTA devrede değildir; bu fazların güvenliği
@@ -30,6 +44,8 @@ import math
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Protocol
+
+from ..core.errors import SafetyInvariantError
 
 
 class Source(Enum):
@@ -78,7 +94,14 @@ class Envelope:
     min_fence_dist_m: float = 50.0
 
     def violations(self, s: VehicleState, scale: float = 1.0) -> list[str]:
-        """scale > 1 zarfı daraltır (daha temkinli), < 1 genişletir."""
+        """scale > 1 zarfı daraltır (daha temkinli), < 1 genişletir.
+
+        Bilinmeyen (sonlu olmayan) durum ihlal sayılır: unknown != healthy.
+        """
+        vals = (s.alt_agl_m, s.airspeed_mps, s.bank_deg, s.pitch_deg, s.climb_mps,
+                s.fence_dist_m, s.fence_closing_mps)
+        if not all(math.isfinite(v) for v in vals):
+            return ["gecersiz_durum"]
         out = []
         if s.alt_agl_m < self.min_alt_m * scale:
             out.append("alcak_irtifa")
@@ -140,6 +163,24 @@ class KinematicPredictor:
         return predict(s, c, horizon_s, self.tau_att_s, self.tau_speed_s)
 
 
+_SEAL = object()   # yalnızca bu modül ValidatedCommand üretebilir
+
+
+@dataclass(frozen=True)
+class ValidatedCommand:
+    """RTA'dan geçmiş komut. Kontrol katmanı yalnızca bu tipi kabul eder."""
+    command: Command
+    source: Source
+    timestamp: float
+    reasons: tuple[str, ...] = ()
+    _seal: object = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if self._seal is not _SEAL:
+            raise SafetyInvariantError(
+                "ValidatedCommand yalnızca RuntimeAssurance tarafından üretilebilir")
+
+
 @dataclass(frozen=True)
 class SafetyDecision:
     """RTA'nın her çevrimdeki açıklanabilir kararı (GCS / tekrar oynatma)."""
@@ -152,6 +193,7 @@ class SafetyDecision:
     prediction_horizon_s: float
     timestamp: float
     switched: bool                           # bu çevrimde kaynak değişti mi
+    validated: ValidatedCommand | None = field(default=None, compare=False)
 
     def to_dict(self) -> dict[str, Any]:
         return {"selected_source": self.selected_source.value,
@@ -204,10 +246,18 @@ class RuntimeAssurance:
                 self.source, self.last_reasons = Source.ADVANCED, []
 
         cmd = ac if self.source is Source.ADVANCED else sc
+        reasons = tuple(self.last_reasons)
         self.last_decision = SafetyDecision(
-            self.source, cmd, tuple(self.last_reasons), tuple(hard), tuple(predicted),
-            self.latched, self.horizon_s, timestamp, self.source is not prev)
+            self.source, cmd, reasons, tuple(hard), tuple(predicted),
+            self.latched, self.horizon_s, timestamp, self.source is not prev,
+            ValidatedCommand(cmd, self.source, timestamp, reasons, _SEAL))
         return self.last_decision
+
+    def safety_only(self, sc: Command, timestamp: float, reason: str) -> ValidatedCommand:
+        """Gelişmiş kontrolcünün söz hakkı olmayan durumlar (acil iniş vb.) için
+        güvenlik katmanı komutunu doğrular. Gelişmiş kontrolcü komutu bu yoldan
+        geçemez: kaynak her zaman SAFETY'dir."""
+        return ValidatedCommand(sc, Source.SAFETY, timestamp, (reason,), _SEAL)
 
     def select(self, s: VehicleState, ac: Command, sc: Command) -> tuple[Command, Source]:
         d = self.decide(s, ac, sc)

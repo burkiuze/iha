@@ -20,6 +20,9 @@ from typing import Any, Callable
 class EventType(str, Enum):
     SIM_STARTED = "sim_started"
     SIM_FINISHED = "sim_finished"
+    SIM_FAILED = "sim_failed"                  # sayısal/mantıksal hata (yeniden fırlatılır)
+    SENSOR_DEGRADED = "sensor_degraded"        # ölçüm yok -> açık geri dönüş kaynağı
+    SENSOR_RESTORED = "sensor_restored"
     FAULT_INJECTED = "fault_injected"
     FAULT_CLEARED = "fault_cleared"
     MODE_TRANSITION = "mode_transition"

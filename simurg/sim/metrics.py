@@ -43,6 +43,7 @@ class SimulationMetrics:
     duration_s: float
     final_mode: str
     mission_completed: bool
+    mission_outcome_reason: str
     impact: bool
     rta_interventions: int
     rta_latched: bool
@@ -95,12 +96,13 @@ def detection_latencies(events: list[dict], faults: list[dict],
 def compute_metrics(events: list[dict], acc: MetricsAccumulator, duration_s: float,
                     final_mode: str, mission_completed: bool, faults: list[dict],
                     activation: dict[str, float], usable_wh: float,
-                    reserve_wh: float) -> SimulationMetrics:
+                    reserve_wh: float, outcome_reason: str = "") -> SimulationMetrics:
     lat = detection_latencies(events, faults, activation)
     return SimulationMetrics(
         duration_s=round(duration_s, 6),
         final_mode=final_mode,
         mission_completed=mission_completed,
+        mission_outcome_reason=outcome_reason,
         impact=_count(events, EventType.IMPACT) > 0,
         rta_interventions=_count(events, EventType.RTA_INTERVENTION),
         rta_latched=_count(events, EventType.RTA_LATCHED) > 0,

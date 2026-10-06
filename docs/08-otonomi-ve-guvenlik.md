@@ -160,3 +160,39 @@ ESC telemetrisi → MotorHealthMonitor → sağlık vektörü
   uyumlu) ve RTA zarfının içinde kalacak şekilde SC tarafından uygulanır.
 - İnsanlı hava aracı her zaman önceliklidir; DAA kararı görev
   planlayıcısını ezer.
+
+## 6. Güvenlik değişmezleri (kodla zorlanır)
+
+Aşağıdaki kurallar yalnızca doküman değildir; her biri
+`tests/test_safety_invariants.py` (ve belirtilen diğer testler) içinde
+adıyla doğrulanır.
+
+| Değişmez | Kod düzeyindeki mekanizma | Test |
+|---|---|---|
+| YZ / gelişmiş kontrolcü nihai uçuş yetkisi olamaz | Kontrol katmanı (`sim/vehicle_control.py`) yalnızca `ValidatedCommand` kabul eder; bu tip yalnızca `RuntimeAssurance` tarafından üretilebilir (mühür) | `test_validated_command_cannot_be_forged`, `test_controller_rejects_unvalidated_command` |
+| YZ katmanının eyleyicilere içe aktarma (import) yolu yoktur | `control/guidance.py` ve `swarm/` dağıtım/eyleyici/itki modüllerini içe aktarmaz | `test_ai_layer_has_no_import_path_to_actuation` |
+| Hatalı YZ önerisi aracı sert zarf dışına çıkaramaz | Simplex RTA + güvenlik kontrolcüsü | `test_ai_cannot_drive_vehicle_outside_hard_envelope` |
+| RTA kilitliyken gelişmiş çıktı seçilemez | `RuntimeAssurance.latched` | `test_rta_latched_never_selects_advanced` |
+| Sert zarf ihlalinde gelişmiş kontrolcü yetki alamaz | Sert ihlal -> kilit | `test_hard_envelope_violation_denies_advanced_authority` |
+| Bilinmeyen (NaN/Inf) durum güvenli sayılmaz | `Envelope.violations` -> `gecersiz_durum` | `test_nonfinite_state_is_not_treated_as_safe` |
+| PARACHUTE havada terminaldir | Geçiş tablosu: yalnızca `PARACHUTE -> DISARMED` (yerde) | `test_parachute_mode_is_terminal_in_air` |
+| Havadaki araç DISARMED olamaz | Tüm `* -> DISARMED` korumaları `landed` ister | `test_airborne_vehicle_cannot_disarm` |
+| Mod değişimi yalnızca geçiş tablosu üzerinden | `FlightModeMachine.request_detailed` | `test_mode_changes_only_through_transition_table` |
+| FAILED eyleyici nominal gibi dağıtıma katılmaz | Sağlık 0 -> sütun 0, komut 0 | `test_failed_actuator_not_treated_as_nominal` |
+| Simülasyon aynı tohumla yeniden üretilebilir | `SeedSequence` alt üreteçleri | `test_simulation_is_deterministic_for_same_seed` |
+| Geçersiz senaryo sessizce çalıştırılmaz | `Scenario.validate` -> `InvalidScenarioError` | `test_invalid_scenario_is_never_run_silently` |
+| Arıza takvimi deterministik uygulanır | İlk adım >= başlangıç | `test_fault_schedule_applied_deterministically` |
+| Olay zamanları geriye gitmez; simülasyon zamanı monoton | Olay yolu `seq`, motor saati | `test_event_timestamps_and_simulation_time_never_go_backwards` |
+| Tekrar oynatma olay sırasını değiştirmez | `ReplaySession` `seq` sıralı | `test_replay_does_not_reorder_events` |
+
+### 6.1 Fail-safe ilkesi: bilinmeyen ≠ sağlıklı
+
+| Durum | Davranış | Test |
+|---|---|---|
+| Hiç gözlenmemiş motor (UNKNOWN) | Havada askı fizibilitesinde çalışmıyor sayılır | `test_failsafe.test_unobserved_motors_are_not_counted_for_hover_when_airborne` |
+| Henüz navigasyon çözümü yok | `integrity_ok = False`, PL = ∞ | `test_failsafe.test_navigation_without_solution_never_reports_integrity` |
+| Sonlu olmayan ölçüm | Kaynak "kullanılamaz" | `test_failsafe.test_nonfinite_measurement_is_treated_as_unavailable` |
+| Kritik ölçüm yok (pitot/baro) | Açık geri dönüş kaynağı + `sensor_degraded` olayı (uyarı, bozulmuş durum) | `test_failsafe.test_airspeed_loss_uses_explicit_fallback_and_is_reported` |
+| Enerji kestirimi yok | Uyarı; eve dönüş/iniş enerjisi yeterli sayılmaz | `test_failsafe.test_unknown_energy_estimate_raises_warning` |
+| Geçersiz yapılandırma | `ConfigurationError` (başlamadan) | `test_failsafe.test_invalid_configuration_is_rejected` |
+| Durum bozulması (NaN) | `sim_failed` olayı + `SimulationError` (sessiz devam yok) | `test_failsafe.test_state_corruption_is_a_simulation_error_not_silent` |

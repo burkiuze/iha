@@ -65,8 +65,14 @@ class SimulationRecorder:
         self.events.append(jsonable(ev.to_dict()))
 
     def maybe_snapshot(self, t: float, snap: dict[str, Any], force: bool = False) -> None:
+        """Periyodik görüntü; `force` ile zorlanır. Zaman damgaları kesin artan kalır:
+        aynı zamanlı ikinci görüntü öncekinin yerine geçer."""
         if force or t + 1e-9 >= self._next_snap:
-            self.snapshots.append(jsonable(snap))
+            item = jsonable(snap)
+            if self.snapshots and self.snapshots[-1].get("t") == item.get("t"):
+                self.snapshots[-1] = item
+            else:
+                self.snapshots.append(item)
             self._next_snap = t + self.snapshot_period_s
 
     def finalize(self, metrics: dict[str, Any]) -> None:

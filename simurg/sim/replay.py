@@ -82,6 +82,64 @@ class ReplaySession:
             out.append((e["time_s"], e["type"], fid))
         return out
 
+    # ---- açıklanabilirlik ---------------------------------------------------
+    def why_mode(self, target: str) -> list[dict[str, Any]]:
+        """`target` moduna HER girişin gerekçesi; acil durum kararıysa kural bilgisi."""
+        out = []
+        for e in self.events_of(EventType.MODE_TRANSITION):
+            d = e["data"]
+            if d["target"] != target:
+                continue
+            cont = next((c["data"] for c in self.events_of(EventType.CONTINGENCY)
+                         if c["time_s"] == e["time_s"] and c["data"].get("requested_mode") == target),
+                        None)
+            out.append({"time_s": e["time_s"], "from": d["source"], "reason": d["reason"],
+                        "contingency_rule": None if cont is None else
+                        {"priority": cont["priority"], "trigger": cont["trigger"],
+                         "description": cont["reason"]}})
+        return out
+
+    def nav_rejections(self) -> list[dict[str, Any]]:
+        return [{"time_s": e["time_s"], "source": e["data"].get("source"),
+                 "reason": e["data"].get("reason"),
+                 "test_statistic": e["data"].get("test_statistic"),
+                 "threshold": e["data"].get("threshold"),
+                 "sources_used": e["data"].get("sources_used")}
+                for e in self.events_of(EventType.NAV_SOURCE_REJECTED)]
+
+    def nav_sources_at(self, t: float) -> list[str]:
+        st = self.state_at(t)
+        return [] if st is None else list(st.get("nav_used", []))
+
+    def explain(self) -> dict[str, Any]:
+        """Önemli kararların yapılandırılmış özeti (GCS / inceleme için)."""
+        def pick(*types: EventType) -> list[dict[str, Any]]:
+            return [{"time_s": e["time_s"], "type": e["type"],
+                     "component": e["data"].get("component", ""),
+                     "reason": e["data"].get("reason", e["message"])}
+                    for e in self.events_of(*types)]
+        return {
+            "mission_outcome": self.metrics.get("mission_outcome_reason"),
+            "mode_changes": [{"time_s": t, "from": a, "to": b, "reason": r}
+                             for t, a, b, r in self.mode_history()],
+            "contingencies": [{"time_s": e["time_s"], "trigger": e["data"]["trigger"],
+                               "priority": e["data"]["priority"],
+                               "requested_mode": e["data"]["requested_mode"]}
+                              for e in self.events_of(EventType.CONTINGENCY)],
+            "rta": self.rta_history(),
+            "faults": [{"time_s": t, "event": typ, "fault_id": fid}
+                       for t, typ, fid in self.fault_timeline()],
+            "health": self.health_history(),
+            "navigation": self.nav_rejections() + pick(EventType.NAV_SOURCE_UNAVAILABLE,
+                                                       EventType.NAV_INTEGRITY_LOST,
+                                                       EventType.NAV_INTEGRITY_RESTORED),
+            "energy": [{"time_s": e["time_s"], **e["data"]}
+                       for e in self.events_of(EventType.ENERGY_WARNING)],
+            "transitions": pick(EventType.TRANSITION_COMPLETED, EventType.TRANSITION_ABORTED),
+            "aborts": pick(EventType.MISSION_ABORT),
+            "sensors": pick(EventType.SENSOR_DEGRADED, EventType.SENSOR_RESTORED),
+        }
+
     def ordering_is_consistent(self) -> bool:
         """Sıra numaraları kesin artan ve zaman damgaları azalmayan mı?"""
         seqs = [e["seq"] for e in self.log["events"]]

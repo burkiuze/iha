@@ -1,6 +1,21 @@
+# Python
 __pycache__/
-*.pyc
-.venv/
+*.py[cod]
 *.egg-info/
+.eggs/
 build/
 dist/
+
+# Ortamlar ve yerel ayarlar (gizli bilgi içerebilir — asla commit edilmez)
+.venv/
+venv/
+.env
+.env.*
+
+# Test / araç çıktıları
+.coverage
+.pytest_cache/
+.mypy_cache/
+
+# Simülasyon çıktıları (JSON kayıtlar vb. yerelde üretilir)
+simulation-output/

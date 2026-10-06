@@ -27,7 +27,7 @@ class TraceabilityTest(unittest.TestCase):
         self.assertEqual(len(ids), len(set(ids)), "yinelenen kimlik")
         for r in rows:
             cols = [c.strip() for c in r.strip().strip("|").split("|")]
-            impl = re.findall(r"`(simurg/[^`]+)`", cols[2])
+            impl = re.findall(r"`([\w./-]+\.(?:py|toml|yml))`", cols[2])
             self.assertTrue(impl, f"{cols[0]}: uygulama yok")
             for p in impl:
                 self.assertTrue((ROOT / p).exists(), f"{cols[0]}: {p} yok")

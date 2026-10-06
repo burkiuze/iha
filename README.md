@@ -25,7 +25,9 @@ zarar verici kullanım amacı yoktur.
 | Tail-sitter geçiş koordinatörü (iptal mantığı dahil) | **var** | `simurg/control/transition.py` |
 | Eyleyici, sensör, ortam modelleri | **var** | `simurg/sim/actuators.py`, `sensors.py`, `environment.py` |
 | Zaman tabanlı arıza enjeksiyonu | **var** | `simurg/sim/faults.py` |
-| Simplex RTA (açıklanabilir kararlar) | **var** | `simurg/safety/rta.py` |
+| Simplex RTA (açıklanabilir kararlar, mühürlü `ValidatedCommand`) | **var** | `simurg/safety/rta.py` |
+| YZ yetki sınırı ve güvenlik değişmezleri (kodla zorlanır, test edilir) | **var** | `docs/08` §6, `tests/test_safety_invariants.py` |
+| Fail-safe: bilinmeyen ≠ sağlıklı | **var** | `docs/08` §6.1, `tests/test_failsafe.py` |
 | FDIR (standart sağlık raporları) | **var** | `simurg/fdir/monitor.py` |
 | Çok kaynaklı navigasyon bütünlüğü → `NavigationSolution` | **var** | `simurg/nav/` |
 | Hibrit enerji yönetimi → `EnergyState` | **var** | `simurg/power/energy_manager.py` |
@@ -69,6 +71,28 @@ Hazır senaryolar: `nominal`, `nav_source_loss`, `nav_integrity_loss`,
 `energy_reserve_warning`, `rta_intervention`, `transition_abort`,
 `combined_degraded`, `hover_capability_loss`, `loss_of_control`. Her biri beklenen güvenlik sonuçlarını tanımlar ve
 testlerde doğrulanır.
+
+### YZ yetki sınırı
+
+```
+YZ / gelişmiş kontrolcü --Command (öneri)--> RuntimeAssurance --ValidatedCommand-->
+    VehicleController (kontrol soyutlaması) --> kontrol dağıtımı --> eyleyiciler
+```
+
+Kontrol katmanı ham öneri kabul etmez; `ValidatedCommand` yalnızca RTA
+tarafından üretilebilir. YZ katmanının eyleyicilere içe aktarma yolu
+yoktur. Bunlar testlerle zorlanan değişmezlerdir (docs/08 §6).
+
+### Kanonik API
+
+| Kavram | Kanonik yer | Geriye dönük uyumluluk |
+|---|---|---|
+| Merkezi durum | `simurg.core.types.VehicleState` | — |
+| RTA durum görünümü | `simurg.safety.rta.EnvelopeState` | `simurg.safety.rta.VehicleState` (takma ad) |
+| RTA kararı | `RuntimeAssurance.decide()` -> `SafetyDecision` | `RuntimeAssurance.select()` |
+| Mod geçişi | `FlightModeMachine.request_detailed()` | `FlightModeMachine.request()` |
+| Acil durum kararı | `ContingencyManager.evaluate_detailed()` | `ContingencyManager.evaluate()` |
+| Kontrol etkinliği | `simurg.control.effectiveness` | `simurg.config.hover_effectiveness()` |
 
 Ayrıntılar (tick sırası, durum modeli, kayıt şeması, determinizm,
 sınırlamalar, simülasyon bulguları):
@@ -125,16 +149,22 @@ examples/                   simulation_demo, fault_injection_demo, replay_demo, 
 
 ## Çalıştırma
 
-Gereksinim: Python ≥ 3.10, NumPy. Başka bağımlılık yoktur (SciPy, Pandas,
-ROS vb. bilinçli olarak kullanılmaz).
+Gereksinim: Python ≥ 3.10, NumPy. Başka çalışma zamanı bağımlılığı yoktur
+(SciPy, Pandas, ROS vb. bilinçli olarak kullanılmaz). Tamamen çevrimdışı
+çalışır; dış servis, ağ erişimi ya da gizli bilgi gerektirmez.
 
 ```bash
-pip install numpy
-python3 -m unittest discover -s tests -v     # ~140 test, ~2 dk (senaryo koşuları dahil)
+pip install -e .                              # ya da yalnızca: pip install numpy
+python3 -m unittest discover -s tests -v     # ~180 test, ~4 dk (senaryo koşuları dahil)
+simurg-sim list                               # = python -m simurg.sim list
 python3 examples/simulation_demo.py nominal
 python3 examples/fault_injection_demo.py
 python3 examples/replay_demo.py
 ```
+
+CI (`.github/workflows/tests.yml`): Python 3.10 / 3.11 / 3.12 üzerinde
+kurulum, tüm testler ve örnek/CLI duman testi. Dağıtım, donanım ya da
+gizli bilgi içermez.
 
 Kütüphane varsayılan olarak terminale yazmaz (`logging` + `NullHandler`);
 ayrıntılı çıktı için `python -m simurg.sim -v run ...`.

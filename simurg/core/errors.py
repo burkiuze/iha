@@ -22,3 +22,7 @@ class InvalidScenarioError(SimurgError, ValueError):
 
 class SimulationError(SimurgError, RuntimeError):
     """Simülasyon sırasında sayısal ya da mantıksal tutarsızlık."""
+
+
+class SafetyInvariantError(SimurgError, RuntimeError):
+    """Mimari güvenlik değişmezi ihlal edildi (ör. RTA'dan geçmemiş komut)."""

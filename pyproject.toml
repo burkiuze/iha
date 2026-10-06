@@ -4,11 +4,36 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "simurg"
+# 0.1.0 -> 0.2.0: geriye dönük uyumlu yeni özellikler (SemVer MINOR; 0.x serisi).
+# Tek sürüm kaynağı burasıdır; simurg/__init__.py ile eşleşmesi testle denetlenir.
 version = "0.2.0"
-description = "SİMURG: kutu kanatlı, kuyruk üstü kalkışlı, hidrojen-hibrit İHA için referans mimari modelleri"
+description = "SİMURG: sivil kutu kanatlı tail-sitter İHA için referans mimari, altın modeller ve deterministik 6-DOF araştırma/dijital ikiz simülasyonu (uçuş yazılımı değildir)"
+readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["numpy>=1.24"]
 license = { text = "Apache-2.0" }
+keywords = ["uav", "simulation", "digital-twin", "runtime-assurance", "fdir", "fault-tolerance"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+]
+# Çalışma zamanı bağımlılığı bilinçli olarak yalnızca NumPy'dir.
+dependencies = ["numpy>=1.24"]
+
+[project.optional-dependencies]
+# Testler yalnızca standart kütüphane `unittest` kullanır; ek araç gerekmez.
+# Paket derlemesini yerelde doğrulamak isteyenler için:
+dev = ["build>=1.0"]
+
+[project.scripts]
+simurg-sim = "simurg.sim.__main__:main"
 
 [tool.setuptools.packages.find]
 include = ["simurg*"]
+exclude = ["tests*", "examples*", "docs*"]

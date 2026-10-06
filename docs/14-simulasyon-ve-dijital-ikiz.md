@@ -43,7 +43,38 @@ Senaryo -> Ortam -> Sensörler -> Navigasyon -> Kontrolcü önerisi -> RTA
         -> Kontrol dağıtımı -> Eyleyiciler -> Dinamik -> Durum -> Kayıt / Metrikler
 ```
 
-### 1.1 Katmanlar ve bağımlılık yönü
+### 1.1 Motor ve alt sistemler (tek sorumluluk)
+
+`SimulationEngine` yalnızca orkestrasyon yapar; mantık alt sistemlerdedir:
+
+| Modül | Sorumluluk |
+|---|---|
+| `sim/engine.py` | Adım sırası, olay yayını, alt sistemleri bağlama |
+| `sim/mission.py` — `MissionManager` | Nominal mod ilerleyişi, ara noktalar, görev iptali/tamamlanması ve gerekçesi |
+| `sim/vehicle_control.py` — `VehicleController` | Moda göre kontrol yasası, dağıtım, kontrol kaybı izleme; **yalnızca `ValidatedCommand`** |
+| `sim/health.py` — `HealthSupervisor` | FDIR izleyicilerini bağlar, sağlık raporları, askı marjı (bilinmeyen ≠ sağlıklı) |
+| `sim/airdata.py` — `AirDataSystem` | Pitot/baro + açık geri dönüş kaynağı |
+| `sim/ground.py` | Yer teması sınıflandırması (güvenli / çarpma) |
+| `power/reserve.py` — `ReserveMonitor` | Eve dönüş enerji ihtiyacı ve uyarı histerezisi |
+
+### 1.2 Yetki zinciri (YZ güvenlik sınırı)
+
+```
+MissionGuidance (gelişmiş kontrolcü / YZ)
+        │ Command (yalnızca öneri)
+        ▼
+RuntimeAssurance  ── SafetyController önerisi
+        │ ValidatedCommand (mühürlü; yalnızca RTA üretebilir)
+        ▼
+VehicleController (kontrol soyutlaması) ──> ScheduledAllocator ──> ActuatorModel
+```
+
+`MissionGuidance`'ın dağıtım, eyleyici ya da itki modüllerine içe aktarma
+yolu yoktur; acil süzülüş gibi YZ'nin söz hakkı olmayan durumlarda
+güvenlik katmanı `RuntimeAssurance.safety_only()` ile (kaynak her zaman
+SAFETY) komut verir. Değişmezlerin tam listesi: docs/08 §6.
+
+### 1.3 Katmanlar ve bağımlılık yönü
 
 ```
 core (tipler, olaylar, hatalar, yapılandırma, eksen takımları)   <- hiçbir şeye bağlı değil
@@ -167,6 +198,14 @@ etkinleşme/temizleme `fault_injected` / `fault_cleared` olayı üretir.
 ## 7. Olay yolu ve kayıt
 
 `EventBus` senkron ve deterministiktir; her olay artan bir `seq` alır.
+
+**Olay veri sözleşmesi:** güvenlikle ilgili her olayın `data` alanı
+JSON-uyumlu ilkel değerler içerir ve en az `reason` taşır; bileşen
+düzeyindeki olaylar ayrıca `component` taşır (`test_explainability`
+bunu tüm senaryolarda denetler). Ör. `fdir_warning` ->
+`{component, state, health_score, confidence, reason, monitor: {cusum, ...}}`,
+`nav_source_rejected` -> `{component, reason, test_statistic, threshold,
+sources_used, protection_level_m}`.
 Yayınlanan olaylar: `mode_transition`, `mode_rejected`, `contingency`,
 `rta_intervention`, `rta_recovery`, `rta_latched`, `fdir_warning`,
 `fdir_failure`, `nav_source_rejected`, `nav_source_unavailable`,
@@ -199,6 +238,18 @@ s = ReplaySession.from_source("kayit.json")      # ya da SimulationResult / dict
 s.timeline(); s.mode_history(); s.rta_history(); s.health_history()
 s.fault_timeline(); s.state_at(42.0); s.series("alt"); s.ordering_is_consistent()
 ```
+
+Açıklanabilirlik yardımcıları:
+
+| Soru | API |
+|---|---|
+| Neden mod RETURN oldu? | `s.why_mode("RETURN")` (gerekçe + tetikleyen acil durum kuralı) |
+| RTA neden, hangi kısıtla müdahale etti? | `s.rta_history()` (`predicted_violations`, `current_violations`) |
+| Hangi nav kaynağı neden dışlandı, hangileri kullanılıyordu? | `s.nav_rejections()`, `s.nav_sources_at(t)` |
+| Motor neden DEGRADED/FAILED? | `s.health_history()`, olay `data.monitor` |
+| Hangi arıza ne zaman? | `s.fault_timeline()` |
+| Görev neden tamamlanmadı? | `s.explain()["mission_outcome"]` |
+| Enerji uyarısı / geçiş iptali neden? | `s.explain()["energy"]`, `s.explain()["transitions"]` |
 
 CLI: `python -m simurg.sim replay kayit.json`
 
@@ -272,8 +323,15 @@ python -m simurg.sim montecarlo combined_degraded --runs 20 --seed 0 --wind 6
   sensörden gelir.
 * Yüzey verim kaybı yalnız konumdan gözlenemez (SurfaceMonitor yalnız
   takılı/devre dışı yüzeyi bulur).
+* Kalkış öncesi ESC öz-testinin geçtiği varsayılır (yerde gözlenmemiş
+  motorlar askı fizibilitesinde sağlam sayılır; havada sayılmaz).
 * Düz arazi (AGL = irtifa), dönmeyen düz Dünya, sabit kütle.
 * Sürü (CBBA) ve haberleşme ağı bu simülasyona henüz bağlı değildir
   (**planlanan**).
 * Performans: tek çekirdekte gerçek zamanın ~15–20 katı hız
   (≈ 1,2 ms/adım). Monte Carlo ilk sürümde sıralıdır.
+
+## 13. Güvenlik değişmezleri ve fail-safe
+
+Kodla zorlanan değişmezler ve "bilinmeyen ≠ sağlıklı" politikası:
+[08-otonomi-ve-guvenlik.md §6](08-otonomi-ve-guvenlik.md).
