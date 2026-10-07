@@ -78,6 +78,22 @@ class HealthSupervisor:
             changed.append(r)
         return changed
 
+    def component_states(self, airborne: bool) -> dict[str, HealthState]:
+        """Bileşen kimliği -> sağlık durumu. Gözlenmemiş motor: havadaysa UNKNOWN,
+        yerdeyse (ESC öz-testi varsayımı) NOMINAL."""
+        out: dict[str, HealthState] = {}
+        unknown = self.unknown_mask
+        for i, cid in enumerate(self.ids):
+            if i < self.n_m:
+                st = self.motors.state[i]
+                if st.value == "ok":
+                    out[cid] = HealthState.UNKNOWN if (unknown[i] and airborne) else HealthState.NOMINAL
+                else:
+                    out[cid] = HealthState(st.value)
+            else:
+                out[cid] = HealthState.FAILED if self.surfaces.failed[i - self.n_m] else HealthState.NOMINAL
+        return out
+
     def details(self, component_id: str) -> dict[str, float]:
         """Açıklanabilirlik için izleyici iç durumu (CUSUM, verim kestirimi)."""
         i = self.ids.index(component_id)

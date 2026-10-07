@@ -36,6 +36,7 @@ class MetricsAccumulator:
     max_transition_alt_loss_m: float = 0.0
     max_attitude_error_deg: float = 0.0
     min_altitude_airborne_m: float = float("inf")
+    worst_system_state: str = "normal"
 
 
 @dataclass(frozen=True)
@@ -64,6 +65,8 @@ class SimulationMetrics:
     transitions_aborted: int = 0
     max_transition_altitude_loss_m: float = 0.0
     max_attitude_error_deg: float = 0.0
+    worst_system_state: str = "normal"
+    commands_rejected: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -123,4 +126,6 @@ def compute_metrics(events: list[dict], acc: MetricsAccumulator, duration_s: flo
         transitions_aborted=_count(events, EventType.TRANSITION_ABORTED),
         max_transition_altitude_loss_m=round(acc.max_transition_alt_loss_m, 6),
         max_attitude_error_deg=round(acc.max_attitude_error_deg, 6),
+        worst_system_state=acc.worst_system_state,
+        commands_rejected=_count(events, EventType.COMMAND_REJECTED),
     )

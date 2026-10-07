@@ -19,7 +19,10 @@ NEEDS_REASON = {EventType.MODE_TRANSITION, EventType.CONTINGENCY, EventType.RTA_
                 EventType.NAV_INTEGRITY_RESTORED, EventType.LINK_LOST, EventType.LINK_RESTORED,
                 EventType.ENERGY_WARNING, EventType.TRANSITION_ABORTED, EventType.MISSION_ABORT,
                 EventType.MISSION_COMPLETE, EventType.TOUCHDOWN, EventType.IMPACT,
-                EventType.SENSOR_DEGRADED, EventType.SENSOR_RESTORED}
+                EventType.SENSOR_DEGRADED, EventType.SENSOR_RESTORED,
+                EventType.PREFLIGHT_PASSED, EventType.PREFLIGHT_FAILED,
+                EventType.COMMAND_REJECTED, EventType.COMMAND_ACCEPTED,
+                EventType.VEHICLE_HEALTH_CHANGED, EventType.SYSTEM_STATE_CHANGED}
 NEEDS_COMPONENT = {EventType.FDIR_WARNING, EventType.FDIR_FAILURE, EventType.NAV_SOURCE_REJECTED,
                    EventType.NAV_SOURCE_UNAVAILABLE, EventType.LINK_LOST, EventType.ENERGY_WARNING,
                    EventType.RTA_INTERVENTION, EventType.CONTINGENCY, EventType.SENSOR_DEGRADED}

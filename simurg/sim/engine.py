@@ -13,11 +13,15 @@ Her adım (tick) aşağıdaki SABİT sırayla çalışır (`TICK_ORDER`):
    9. actuators         gecikme, tepki, doyma, eyleyici arızaları
   10. dynamics          6-DOF integrasyon + yer teması; zaman burada ilerler
   11. power             elektrik yükü -> enerji yöneticisi
-  12. contingency       bağlantı, enerji rezervi (ReserveMonitor), acil durum kuralları
+  12. contingency       bağlantı, enerji rezervi (ReserveMonitor), acil durum kuralları,
+                        araç sağlık modeli + sistem denetçisi (üst seviye durum)
   13. logging           anlık görüntü kaydı
   14. metrics           metrik biriktirme
 
+Başlatma: PreflightSupervisor'ın 8 kontrolü geçmeden araç ARMED olamaz.
+
 Yetki zinciri (değişmez): MissionGuidance (AC) yalnızca `Command` ÖNERİR;
+CommandValidator biçimsel olarak geçersiz öneriyi reddeder;
 RuntimeAssurance bunu `ValidatedCommand`'a çevirir; VehicleController
 yalnızca `ValidatedCommand` kabul eder. Eyleyicilere giden tek yol
 VehicleController -> ActuatorModel'dir.
@@ -44,12 +48,14 @@ from ..core.errors import SimulationError
 from ..core.events import EventBus, EventType
 from ..core.frames import attitude_angles, quat_from_euler, quat_to_dcm
 from ..core.types import HealthState, NavigationSolution, VehicleState
-from ..modes.flight_modes import (FIXED_WING_MODES, Context, ContingencyManager,
-                                  FlightModeMachine, Mode, TransitionRecord)
+from ..fdir.vehicle_health import VehicleHealth, VehicleHealthModel
+from ..modes.flight_modes import (CONTINGENCY_RULES, FIXED_WING_MODES, Context,
+                                  ContingencyManager, FlightModeMachine, Mode, TransitionRecord)
 from ..nav.integrity import IntegrityMonitor
 from ..nav.providers import NavigationSystem
 from ..power.energy_manager import EnergyManager
 from ..power.reserve import LANDING_ENERGY_WH, ReserveMonitor
+from ..safety.command_validator import CommandValidator
 from ..safety.rta import Command, EnvelopeState, RuntimeAssurance, Source, ValidatedCommand
 from .actuators import ActuatorCommand, ActuatorModel, ActuatorState, rpm_from_output
 from .airdata import AirDataSystem
@@ -61,10 +67,12 @@ from .health import HealthSupervisor
 from .link import LinkModel
 from .metrics import MetricsAccumulator, SimulationMetrics, compute_metrics
 from .mission import MissionManager, MissionView
+from .preflight import PreflightInputs, PreflightReport, PreflightSupervisor
 from .propulsion import PropulsionModel
 from .recorder import SimulationRecorder
 from .scenario import Scenario
 from .sensors import DEFAULT_POSITION_SOURCES, SensorModel, SensorSuite, SimulatedPositionProvider
+from .supervisor import SYSTEM_SEVERITY, SystemAssessment, SystemSupervisor
 from .vehicle_control import ControlInputs, HoverPlan, VehicleController
 
 log = logging.getLogger(__name__)
@@ -82,6 +90,8 @@ _HOME_LANDING_RADIUS_M = 400.0
 _GLIDE_COMMAND = Command(0.0, -3.0, 20.0)
 _GLIDE_FLARE = Command(0.0, 4.0, 20.0)
 _GLIDE_FLARE_ALT_M = 4.0
+_CONTINGENCY_TRIGGERS = frozenset(r.trigger for r in CONTINGENCY_RULES)
+_UNMET_POWER_PERSIST_S = 0.5     # bundan kısa güç açıkları sağlık arızası sayılmaz (titreşim önleme)
 
 
 @dataclass
@@ -160,6 +170,15 @@ class SimulationEngine:
         self.rta = RuntimeAssurance(horizon_s=sf.rta_horizon_s, recovery_cycles=sf.rta_recovery_cycles)
         self.trans = TransitionCoordinator()
         self.controller = VehicleController(v, sf, self.aero, self.prop)
+        self.validator = CommandValidator()
+        self.preflight = PreflightSupervisor()
+        self.vhm = VehicleHealthModel()
+        self.supervisor = SystemSupervisor()
+        self.preflight_report: PreflightReport | None = None
+        self.vehicle_health: VehicleHealth | None = None
+        self.system: SystemAssessment | None = None
+        self._proposal_rejected = False
+        self._unmet_timer = 0.0
         self.injector = FaultInjector(scenario.faults, {
             "actuator": self.act, "sensor": self.sensors, "link": self.link,
             "energy": EnergyFaultTarget(self.em), "controller": ControllerFaultTarget(self.guid),
@@ -186,7 +205,7 @@ class SimulationEngine:
         self.nav_sol = NavigationSolution(np.array([*self.home, 0.0]), np.zeros(3), 0.0,
                                           float("inf"), (), (), (), False, 0.0)
         self._nav_initialized = False
-        self.ctx = Context(preflight_ok=True)
+        self.ctx = Context(preflight_ok=False)       # yalnızca PreflightSupervisor açar
         self.acc = MetricsAccumulator()
         self._started = False
 
@@ -215,9 +234,33 @@ class SimulationEngine:
             return
         self._started = True
         self.bus.publish(EventType.SIM_STARTED, 0.0, "engine", self.sc.name, seed=self.sc.seed)
+        self.injector.update(0.0)            # t=0 arızaları uçuş öncesinde zaten mevcuttur
+        rep = self.preflight.run(self._preflight_inputs())
+        self.preflight_report = rep
+        self.ctx.preflight_ok = rep.passed
+        self._pub(EventType.PREFLIGHT_PASSED if rep.passed else EventType.PREFLIGHT_FAILED,
+                  ",".join(rep.failed), component="preflight_supervisor",
+                  reason="tum_kontroller_gecti" if rep.passed else "basarisiz:" + ",".join(rep.failed),
+                  **rep.to_dict())
         self.fsm.request(Mode.ARMED, self.ctx, "preflight_ok")
-        self.fsm.request(Mode.VTOL_TAKEOFF, self.ctx, "gorev_baslat")
+        if rep.passed:
+            self.fsm.request(Mode.VTOL_TAKEOFF, self.ctx, "gorev_baslat")
+        else:
+            self.finished = True             # silahlanamayan araç kalkmaz
         self.recorder.maybe_snapshot(0.0, self._snapshot(), force=True)
+
+    def _preflight_inputs(self) -> PreflightInputs:
+        m, sf = self.sc.mission, self.sc.safety
+        pts = [self.home] + [np.array(w, float) for w in m.waypoints] + [self.home]
+        dist = float(sum(np.linalg.norm(b - a) for a, b in zip(pts, pts[1:])))
+        status = {sid: (not s.dropout and s.health > 0.0) for sid, s in self.sensors.sensors.items()}
+        failed = tuple(self.act.ids[i] for i, md in enumerate(self.act.modes)
+                       if md.value in ("offline", "stuck"))          # yerleşik test (BIT) sonucu
+        return PreflightInputs(
+            status, tuple(DEFAULT_POSITION_SOURCES), self.nav.min_sources_for_integrity,
+            self.em.usable_energy_wh(), dist, m.cruise_speed_mps, sf.cruise_power_estimate_w,
+            self.health.hover_margin, failed, self.link.update(0.0)[0], tuple(m.waypoints),
+            tuple(m.home_ne), m.takeoff_alt_m, sf, self.rta.soft, self.rta.hard)
 
     def step(self) -> None:
         """Tek adım. Sayısal hata `sim_failed` olayıyla kaydedilip yeniden fırlatılır."""
@@ -245,6 +288,7 @@ class SimulationEngine:
         self._health()                                                      # 5
         self._mission_step()                                                # 6
         ac, sc = self._proposals()
+        ac = self._validate_proposal(ac)
         validated = self._rta(ac, sc)                                       # 7
         u = self.controller.compute(self._control_inputs(R, v_air_b, validated),   # 8
                                     self.plan, self.sc.mission.cruise_speed_mps)
@@ -271,7 +315,9 @@ class SimulationEngine:
             self.recorder.events, self.acc, self.t, self.mode.name, self.mission.completed,
             [f.to_dict() for f in self.sc.faults], dict(self.injector.activation_times),
             self.em.usable_energy_wh(), self.em.reserve_energy_wh(),
-            self.mission.outcome_reason(self.mode.name, impact, self.timed_out))
+            ("preflight_basarisiz:" + ",".join(self.preflight_report.failed)
+             if self.preflight_report is not None and not self.preflight_report.passed
+             else self.mission.outcome_reason(self.mode.name, impact, self.timed_out)))
         self.recorder.finalize(metrics.to_dict())
         result = SimulationResult(self.sc.name, self.sc.seed, vs, metrics,
                                   self.recorder.to_dict(), [])
@@ -307,6 +353,9 @@ class SimulationEngine:
                   "sat": round(self.controller.saturation_fraction, 4),
                   "power_factor": round(self._power_factor, 4),
                   "airdata_degraded": sorted(k for k, d in self.airdata.degraded.items() if d),
+                  "system_state": None if self.system is None else self.system.state.value,
+                  "vehicle_health": None if self.vehicle_health is None
+                  else self.vehicle_health.overall.value,
                   "transition": None if self.trans_status is None else self.trans_status.phase.value})
         return s
 
@@ -460,12 +509,29 @@ class SimulationEngine:
                                     m.cruise_alt_m, m.cruise_speed_mps, self.airspeed)
         return ac, sc
 
+    def _validate_proposal(self, ac: Command | None) -> Command | None:
+        """YZ önerisi -> CommandValidator. Geçersiz öneri RTA'ya ulaşmaz."""
+        if ac is None:
+            return None
+        res = self.validator.validate(ac)
+        if not res.accepted and not self._proposal_rejected:
+            self._pub(EventType.COMMAND_REJECTED, ",".join(res.reasons),
+                      component="command_validator", **res.to_dict())
+        elif res.accepted and self._proposal_rejected:
+            self._pub(EventType.COMMAND_ACCEPTED, "", component="command_validator",
+                      reason="oneri_yeniden_gecerli")
+        self._proposal_rejected = not res.accepted
+        return res.command
+
     # ================================================================ 7. rta
     def _rta(self, ac: Command | None, sc: Command | None) -> ValidatedCommand | None:
         mode = self.mode
         if mode is Mode.EMERGENCY_LAND and not self.plan.emergency_vertical:
             glide = _GLIDE_FLARE if self.alt_meas <= _GLIDE_FLARE_ALT_M else _GLIDE_COMMAND
             return self.rta.safety_only(glide, self.t, "acil_suzulus")
+        if ac is None and mode in FIXED_WING_MODES and sc is not None:
+            # öneri reddedildi: o adımda yalnızca güvenlik kontrolcüsü yetkili
+            return self.rta.safety_only(sc, self.t, "gecersiz_oneri")
         if ac is None:
             return None                 # askı/geçiş: RTA zarfı tanımsız, komut yok
         _, pitch, bank = self._att()
@@ -544,6 +610,7 @@ class SimulationEngine:
         load = p_prop + self.vehicle.avionics_power_w
         split = self.em.step(self.dt, load, 0.0, emergency=self.mode not in _RESERVE_LOCKED)
         self.acc.energy_consumed_j += load * self.dt
+        self._unmet_timer = self._unmet_timer + self.dt if split.unmet_w > 1e-6 else 0.0
         if split.unmet_w > 1e-6 and p_prop > 1e-6:
             self._power_factor = min(max((p_prop - split.unmet_w) / p_prop, 0.0), 1.0)
         else:
@@ -582,6 +649,42 @@ class SimulationEngine:
         if d is not None and d.accepted:
             self._pub(EventType.CONTINGENCY, d.trigger, component="contingency_manager",
                       **d.to_dict())
+        self._supervise(ctx)
+
+    def _supervise(self, ctx: Context) -> None:
+        """Araç sağlık modeli + sistem denetçisi (yalnızca değerlendirir, komut vermez)."""
+        airborne = not self.landed
+        sp = self.em.last_split
+        vh = self.vhm.assess(
+            actuator_states=self.health.component_states(airborne),
+            hover_feasible=ctx.hover_feasible, airborne=airborne,
+            degraded_sensors=[k for k, d in self.airdata.degraded.items() if d],
+            nav=self.nav_sol, nav_initialized=self._nav_initialized,
+            energy_health=self.em.health, usable_energy_wh=self.em.usable_energy_wh(),
+            energy_warning=self.reserve.active,
+            unmet_power_w=(0.0 if sp is None or self._unmet_timer < _UNMET_POWER_PERSIST_S
+                           else sp.unmet_w),
+            link_up=self._link_up, controllable=ctx.controllable)
+        if self.vehicle_health is None or vh.signature() != self.vehicle_health.signature():
+            self._pub(EventType.VEHICLE_HEALTH_CHANGED, vh.overall.value, component="vehicle_health_model",
+                      reason=";".join(f"{d.domain.value}:{d.reason}" for d in vh.domains
+                                      if d.state.value != "nominal") or "nominal",
+                      **vh.to_dict())
+        self.vehicle_health = vh
+        last = next((r for r in reversed(self.fsm.records) if r.accepted), None)
+        sa = self.supervisor.assess(
+            mode=self.mode, health=vh, rta_on_safety=self.rta.source is Source.SAFETY,
+            rta_latched=self.rta.latched,
+            contingency_mode=last is not None and last.reason in _CONTINGENCY_TRIGGERS
+            and not self.landed,
+            energy_warning=self.reserve.active, proposal_rejected=self._proposal_rejected)
+        if self.system is None or sa.state is not self.system.state:
+            self._pub(EventType.SYSTEM_STATE_CHANGED, sa.state.value, component="system_supervisor",
+                      previous=None if self.system is None else self.system.state.value,
+                      **sa.to_dict())
+            if SYSTEM_SEVERITY[sa.state] > SYSTEM_SEVERITY[type(sa.state)(self.acc.worst_system_state)]:
+                self.acc.worst_system_state = sa.state.value
+        self.system = sa
 
     # ============================================================ 14. metrics
     def _metrics(self) -> None:

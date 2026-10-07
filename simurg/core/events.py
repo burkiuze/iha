@@ -23,6 +23,12 @@ class EventType(str, Enum):
     SIM_FAILED = "sim_failed"                  # sayısal/mantıksal hata (yeniden fırlatılır)
     SENSOR_DEGRADED = "sensor_degraded"        # ölçüm yok -> açık geri dönüş kaynağı
     SENSOR_RESTORED = "sensor_restored"
+    PREFLIGHT_PASSED = "preflight_passed"
+    PREFLIGHT_FAILED = "preflight_failed"
+    COMMAND_REJECTED = "command_rejected"      # YZ önerisi doğrulayıcıdan geçmedi
+    COMMAND_ACCEPTED = "command_accepted"      # reddedilen öneri akışı yeniden geçerli
+    VEHICLE_HEALTH_CHANGED = "vehicle_health_changed"
+    SYSTEM_STATE_CHANGED = "system_state_changed"
     FAULT_INJECTED = "fault_injected"
     FAULT_CLEARED = "fault_cleared"
     MODE_TRANSITION = "mode_transition"
