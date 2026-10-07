@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from ..core.events import EventType
-from .recorder import load_log
+from .recorder import channel_events, load_log
 
 
 class ReplaySession:
@@ -99,6 +99,48 @@ class ReplaySession:
                          "description": cont["reason"]}})
         return out
 
+    def channel(self, name: str) -> list[dict[str, Any]]:
+        """Uçuş veri kaydedicisinin mantıksal kanalı (bkz. `RECORDER_CHANNELS`)."""
+        return list(self.snapshots) if name == "state" else channel_events(self.events, name)
+
+    def why_rta_intervened(self) -> list[dict[str, Any]]:
+        """Her RTA müdahalesi: tahmin edilen / mevcut ihlaller ve seçilen kaynak."""
+        return [r for r in self.rta_history() if r["event"] != EventType.RTA_RECOVERY.value]
+
+    def why_lane_isolated(self, lane: str) -> list[dict[str, Any]]:
+        """Bir FCC şeridinin oylamadan çıkarılma (ISOLATED/FAILED) gerekçeleri."""
+        return [{"time_s": e["time_s"], "lane": e["data"]["lane"], "state": e["data"]["state"],
+                 "previous": e["data"]["previous"], "reason": e["data"]["reason"],
+                 "configuration": e["data"].get("configuration"),
+                 "voters": e["data"].get("voters")}
+                for e in self.events_of(EventType.FCC_LANE_STATE_CHANGED)
+                if e["data"]["lane"] == lane and e["data"]["state"] in ("isolated", "failed")]
+
+    def why_nav_degraded(self) -> list[dict[str, Any]]:
+        """Navigasyonun bozulduğu anlar: kaynak kaybı, dışlama, bütünlük kaybı."""
+        out = [{"time_s": e["time_s"], "type": e["type"], "source": e["data"].get("source"),
+                "reason": e["data"].get("reason")}
+               for e in self.events_of(EventType.NAV_SOURCE_UNAVAILABLE,
+                                       EventType.NAV_SOURCE_REJECTED, EventType.NAV_INTEGRITY_LOST)]
+        return sorted(out, key=lambda x: x["time_s"])
+
+    def why_actuator_removed(self, actuator: str) -> list[dict[str, Any]]:
+        """Eyleyicinin nominal dağıtımdan çıkarılma nedeni + öncesindeki FDIR kararları."""
+        excl = [e for e in self.events_of(EventType.ACTUATOR_EXCLUDED) if e["data"]["component"] == actuator]
+        fdir = [{"time_s": e["time_s"], "type": e["type"], "state": e["data"].get("state"),
+                 "reason": e["data"].get("reason")}
+                for e in self.events_of(EventType.FDIR_WARNING, EventType.FDIR_FAILURE)
+                if e["data"].get("component") == actuator]
+        return [{"time_s": e["time_s"], "reason": e["data"]["reason"],
+                 "hover_margin_after": e["data"].get("hover_margin_after"),
+                 "monitor": e["data"].get("monitor"), "fdir_history": fdir} for e in excl]
+
+    def why_command_rejected(self) -> list[dict[str, Any]]:
+        return [{"time_s": e["time_s"], "category": e["data"].get("category"),
+                 "stage": e["data"].get("stage"), "reasons": e["data"].get("reasons"),
+                 "age_s": e["data"].get("age_s")}
+                for e in self.events_of(EventType.COMMAND_REJECTED)]
+
     def nav_rejections(self) -> list[dict[str, Any]]:
         return [{"time_s": e["time_s"], "source": e["data"].get("source"),
                  "reason": e["data"].get("reason"),
@@ -139,7 +181,12 @@ class ReplaySession:
                        for e in self.events_of(EventType.ENERGY_WARNING)],
             "transitions": pick(EventType.TRANSITION_COMPLETED, EventType.TRANSITION_ABORTED),
             "aborts": pick(EventType.MISSION_ABORT),
-            "sensors": pick(EventType.SENSOR_DEGRADED, EventType.SENSOR_RESTORED),
+            "sensors": pick(EventType.SENSOR_DEGRADED, EventType.SENSOR_RESTORED,
+                            EventType.SENSOR_HEALTH_CHANGED),
+            "fcc": pick(EventType.FCC_LANE_STATE_CHANGED),
+            "commands": self.why_command_rejected(),
+            "allocation": pick(EventType.ACTUATOR_EXCLUDED),
+            "vehicle_health": pick(EventType.VEHICLE_HEALTH_CHANGED),
         }
 
     def ordering_is_consistent(self) -> bool:

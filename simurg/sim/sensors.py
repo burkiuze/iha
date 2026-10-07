@@ -29,6 +29,7 @@ class SensorModel:
         self.noise_scale = 1.0
         self.dropout = False
         self.health = 1.0
+        self.observers: list = []        # salt-okur gözlemciler (ölçüm hattı); RNG tüketmez
 
     def measure(self, truth: np.ndarray | float, t: float) -> SensorMeasurement:
         truth = np.atleast_1d(np.asarray(truth, float))
@@ -36,10 +37,14 @@ class SensorModel:
         noise = self.rng.standard_normal(truth.shape) * self.noise_std * self.noise_scale
         cov = np.diag(self.noise_std ** 2)
         if self.dropout:
-            return SensorMeasurement(self.sensor_id, t, truth * np.nan, cov, False, 0.0, 0.0)
-        quality = 1.0 / self.noise_scale
-        return SensorMeasurement(self.sensor_id, t, truth + self.bias + noise, cov, True,
-                                 float(min(quality, 1.0)), self.health)
+            m = SensorMeasurement(self.sensor_id, t, truth * np.nan, cov, False, 0.0, 0.0)
+        else:
+            quality = 1.0 / self.noise_scale
+            m = SensorMeasurement(self.sensor_id, t, truth + self.bias + noise, cov, True,
+                                  float(min(quality, 1.0)), self.health)
+        for obs in self.observers:
+            obs(m)
+        return m
 
     # ---- FaultTarget --------------------------------------------------------
     def apply_fault(self, fault: Fault) -> None:

@@ -23,6 +23,9 @@ class EventType(str, Enum):
     SIM_FAILED = "sim_failed"                  # sayısal/mantıksal hata (yeniden fırlatılır)
     SENSOR_DEGRADED = "sensor_degraded"        # ölçüm yok -> açık geri dönüş kaynağı
     SENSOR_RESTORED = "sensor_restored"
+    SENSOR_HEALTH_CHANGED = "sensor_health_changed"  # ölçüm hattı kanal sağlığı değişti
+    FCC_LANE_STATE_CHANGED = "fcc_lane_state_changed"  # şerit durumu (yalıtım/arıza dahil)
+    ACTUATOR_EXCLUDED = "actuator_excluded"    # eyleyici nominal dağıtımdan çıkarıldı
     PREFLIGHT_PASSED = "preflight_passed"
     PREFLIGHT_FAILED = "preflight_failed"
     COMMAND_REJECTED = "command_rejected"      # YZ önerisi doğrulayıcıdan geçmedi

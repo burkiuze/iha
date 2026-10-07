@@ -4,11 +4,14 @@ Doğrudan hiçbir eyleyiciyi sürmez ve mod değiştirmez; uçuş modu, araç
 sağlığı, navigasyon, enerji, RTA ve haberleşme bilgisini birleştirip
 operatöre/kayda tek bir durum verir:
 
-  EMERGENCY   : acil iniş/paraşüt modu ya da kontrol kaybı
+  EMERGENCY   : acil iniş/paraşüt modu, kontrol kaybı ya da araç sağlığı CRITICAL
   CONTINGENCY : acil durum kuralıyla girilmiş mod, RTA kilidi,
-                nav bütünlüğü ya da C2 kaybı
+                nav bütünlüğü ya da C2 kaybı, araç sağlığı CONTINGENCY
   DEGRADED    : araç sağlığı NOMINAL değil (UNKNOWN dahil), RTA güvenlik
                 kaynağında, enerji uyarısı ya da geçersiz YZ önerisi
+
+Girdiler: araç sağlığı (FDIR raporları, nav bütünlüğü, enerji, haberleşme,
+kontrol otoritesi, FCC şeritleri dahil), RTA durumu, uçuş modu.
   NORMAL      : yukarıdakilerin hiçbiri
 
 Kurallar yukarıdan aşağı değerlendirilir; ilk eşleşen durum seçilir ve
@@ -21,7 +24,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from ..core.types import HealthState
-from ..fdir.vehicle_health import Domain, VehicleHealth
+from ..fdir.vehicle_health import Domain, VehicleHealth, VehicleHealthLevel
 from ..modes.flight_modes import Mode
 
 
@@ -55,6 +58,8 @@ class SystemSupervisor:
             emergency.append(f"mod:{mode.name}")
         if health.domain(Domain.CONTROL).state is HealthState.FAILED:
             emergency.append("kontrol_kaybi")
+        if health.level is VehicleHealthLevel.CRITICAL:
+            emergency.append("arac_sagligi_kritik")
         if emergency:
             return SystemAssessment(SystemState.EMERGENCY, tuple(emergency))
 
@@ -67,6 +72,8 @@ class SystemSupervisor:
             cont.append("nav_butunluk_kaybi")
         if health.domain(Domain.COMMUNICATION).state is HealthState.FAILED:
             cont.append("c2_kaybi")
+        if health.level is VehicleHealthLevel.CONTINGENCY:
+            cont += [f"saglik:{r}" for r in health.reasons if ":failed:" in r]
         if cont:
             return SystemAssessment(SystemState.CONTINGENCY, tuple(cont))
 

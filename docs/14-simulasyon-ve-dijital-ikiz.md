@@ -96,16 +96,16 @@ motor onları sırayla çalıştırır ve sonuçları **olay yolu** (`EventBus`)
 |---|---|---|
 | 1 | `scenario_events` | Zamanı gelen arızaları uygular / süresi dolanları temizler |
 | 2 | `environment` | Rüzgâr (+ isteğe bağlı türbülans), yoğunluk |
-| 3 | `sensors` | Pitot ve barometre ölçümü (gürültülü) |
+| 3 | `sensors` | Pitot ve barometre ölçümü (gürültülü); tüm ham ölçümler ölçüm hattına (`SensorPipeline`, salt gözlem) düşer, 5. adım sonunda işlenir |
 | 4 | `navigation` | 5 Hz: konum kaynakları -> bütünlük -> `NavigationSolution` |
 | 5 | `health` | FDIR: beklenen (nominal model) ve ölçülen devir/konum artığı |
 | 6 | `proposals` | Görev yöneticisi nominal mod ilerleyişini ister; AC ve SC komut önerir |
-| 7 | `rta` | Yalnız sabit kanat modlarında: Simplex karar |
-| 8 | `allocation` | Tutum + itki isteği -> rejime bağlı RPI dağıtımı |
+| 7 | `rta` | Öneri önce `CommandValidator`'dan (şema, tazelik, mod, sınır, yetki) geçer; yalnız sabit kanat modlarında Simplex karar |
+| 8 | `allocation` | Tutum + itki isteği -> rejime bağlı RPI dağıtımı -> üçlü FCC şerit oylaması (`TriplexFlightComputer`) |
 | 9 | `actuators` | Gecikme, birinci derece tepki, doyma, arıza modları |
 | 10 | `dynamics` | RK4 (varsayılan) ile 6-DOF integrasyon, yer teması; **zaman burada ilerler** |
 | 11 | `power` | Momentum teorisi ile elektrik yükü -> `EnergyManager` |
-| 12 | `contingency` | Bağlantı süresi, enerji uyarısı, `ContingencyManager` |
+| 12 | `contingency` | Bağlantı süresi, enerji uyarısı, `ContingencyManager`, Vehicle Health Manager (8 FDIR raporu -> seviye), System Supervisor |
 | 13 | `logging` | Periyodik anlık görüntü |
 | 14 | `metrics` | Sayaçlar (doyma, tutum hatası, ...) |
 
@@ -178,6 +178,9 @@ Hazır senaryolar (`python -m simurg.sim list`):
 | `combined_degraded` | Rüzgâr+türbülans, motor kaybı, GNSS sapması, kısa C2 kesintisi | Hepsi tespit edilir, güvenli iniş |
 | `hover_capability_loss` | Aynı uçtaki iki motor seyirde devre dışı | Kural 2: hover yok -> sabit kanatla süzülerek acil iniş |
 | `loss_of_control` | Dört dış motor + tüm elevonlar devre dışı | Önce acil iniş denenir; kontrol kaybında kural 1: paraşüt |
+| `fcc_lane_divergence` | FCC şerit B çıktısı sapar | Medyan maskeler, B ISOLATED, ikili mod, görev tamam |
+| `fcc_lane_loss` | FCC şerit A kalp atışı kesilir | Bekçi zaman aşımı, A FAILED, ikili mod, görev tamam |
+| `mission_computer_failure` | Görev bilgisayarı önerisi 6 s donar | Bayat öneri doğrulayıcıda reddedilir (RTA'ya ulaşmaz), görev tamam |
 
 ## 6. Arıza enjeksiyonu
 
@@ -189,7 +192,8 @@ Hazır senaryolar (`python -m simurg.sim list`):
 | `actuator_degraded` / `actuator_stuck` / `actuator_offline` | `actuator:M1U` … `actuator:E2L` | Verim kaybı / takılı / devre dışı |
 | `link_loss` | `link:c2` | C2 bağlantısı yok |
 | `energy_fc_degraded` / `energy_battery_fade` / `energy_power_limit` | `energy:*` | Yakıt hücresi gücü / kapasite (kalıcı) / bara güç sınırı |
-| `controller_fault` | `controller:advanced` | Gelişmiş kontrolcü zarf dışı öneri üretir (RTA testi) |
+| `controller_fault` | `controller:advanced` | Zarf dışı öneri (RTA testi) ya da `params={"mode": "stale"}` ile donmuş öneri (doğrulayıcı testi) |
+| `fcc_lane_unavailable` / `fcc_lane_divergence` | `fcc:A`, `fcc:B`, `fcc:C` | Şerit kalp atışı yok / şerit çıktısı sapar |
 
 Arıza, zamanı `start_time_s`'e eşit ya da onu geçen **ilk adımda**
 etkinleşir; aynı senaryo + dt her koşuda aynı adımı seçer. Her
@@ -212,7 +216,10 @@ Yayınlanan olaylar: `mode_transition`, `mode_rejected`, `contingency`,
 `nav_integrity_lost/restored`, `link_lost/restored`, `energy_warning`,
 `transition_started/completed/aborted`, `mission_abort`,
 `mission_complete`, `touchdown`, `impact`, `fault_injected/cleared`,
-`sim_started/finished`.
+`sim_started/finished`, `preflight_passed/failed`, `command_rejected/accepted`,
+`sensor_health_changed`, `fcc_lane_state_changed`, `actuator_excluded`,
+`vehicle_health_changed`, `system_state_changed`. Her olay türü bir uçuş veri
+kaydedici kanalına eşlidir (`simurg.sim.recorder.RECORDER_CHANNELS`).
 
 Kayıt şeması (`simurg.sim-log`, sürüm 1):
 

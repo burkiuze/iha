@@ -13,6 +13,11 @@
 
 Her adımda tam durum yazılmaz; anlık görüntüler `snapshot_period_s`
 aralıklarla, olaylar ise oluştukları anda (kayıpsız) kaydedilir.
+
+Uçuş veri kaydedicisi mantıksal kanallara ayrılır (`RECORDER_CHANNELS`):
+state (anlık görüntüler), health, mode, fdir, rta, navigation, energy,
+command, fcc, sensors, system, faults. Kanal tek kaydın görünümüdür; ayrı
+dosya değildir, böylece olay sırası (seq) tüm kanallarda korunur.
 """
 
 from __future__ import annotations
@@ -29,6 +34,33 @@ from ..core.events import Event, EventBus
 
 SCHEMA = "simurg.sim-log"
 SCHEMA_VERSION = 1
+
+# Olay türü -> kaydedici kanalı (state kanalı anlık görüntülerdir).
+RECORDER_CHANNELS: dict[str, tuple[str, ...]] = {
+    "health": ("vehicle_health_changed",),
+    "mode": ("mode_transition", "mode_rejected", "contingency", "transition_started",
+             "transition_completed", "transition_aborted", "mission_abort", "mission_complete",
+             "preflight_passed", "preflight_failed"),
+    "fdir": ("fdir_warning", "fdir_failure", "actuator_excluded"),
+    "rta": ("rta_intervention", "rta_recovery", "rta_latched"),
+    "navigation": ("nav_source_rejected", "nav_source_unavailable", "nav_integrity_lost",
+                   "nav_integrity_restored"),
+    "energy": ("energy_warning",),
+    "command": ("command_rejected", "command_accepted"),
+    "fcc": ("fcc_lane_state_changed",),
+    "sensors": ("sensor_degraded", "sensor_restored", "sensor_health_changed"),
+    "system": ("system_state_changed", "sim_started", "sim_finished", "sim_failed",
+               "link_lost", "link_restored", "touchdown", "impact"),
+    "faults": ("fault_injected", "fault_cleared"),
+}
+CHANNEL_OF: dict[str, str] = {t: ch for ch, types in RECORDER_CHANNELS.items() for t in types}
+
+
+def channel_events(events: list[dict[str, Any]], channel: str) -> list[dict[str, Any]]:
+    if channel not in RECORDER_CHANNELS:
+        raise KeyError(f"bilinmeyen kayıt kanalı: {channel}")
+    types = set(RECORDER_CHANNELS[channel])
+    return [e for e in events if e["type"] in types]
 
 
 def jsonable(x: Any) -> Any:
@@ -74,6 +106,10 @@ class SimulationRecorder:
             else:
                 self.snapshots.append(item)
             self._next_snap = t + self.snapshot_period_s
+
+    def channel(self, name: str) -> list[dict[str, Any]]:
+        """Mantıksal kanal: "state" anlık görüntüleri, diğerleri olayları döndürür."""
+        return list(self.snapshots) if name == "state" else channel_events(self.events, name)
 
     def finalize(self, metrics: dict[str, Any]) -> None:
         self.metrics = jsonable(metrics)

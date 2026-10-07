@@ -9,7 +9,7 @@ tasarlanmıştır.
 
 import logging
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 # Kütüphane varsayılan olarak terminale yazmaz; uygulama logging'i yapılandırır.
 logging.getLogger(__name__).addHandler(logging.NullHandler())

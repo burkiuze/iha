@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "simurg"
 # 0.1.0 -> 0.2.0: geriye dönük uyumlu yeni özellikler (SemVer MINOR; 0.x serisi).
 # Tek sürüm kaynağı burasıdır; simurg/__init__.py ile eşleşmesi testle denetlenir.
-version = "0.2.0"
+version = "0.3.0"
 description = "SİMURG: sivil kutu kanatlı tail-sitter İHA için referans mimari, altın modeller ve deterministik 6-DOF araştırma/dijital ikiz simülasyonu (uçuş yazılımı değildir)"
 readme = "README.md"
 requires-python = ">=3.10"

@@ -5,11 +5,13 @@ Her adım (tick) aşağıdaki SABİT sırayla çalışır (`TICK_ORDER`):
    1. scenario_events   arıza takvimi (FaultInjector)
    2. environment       rüzgâr, yoğunluk
    3. sensors           hava verisi (AirDataSystem, açık geri dönüşlü)
+                        + ölçüm hattı (SensorPipeline, salt gözlem; 5. adım sonunda)
    4. navigation        konum kaynakları + bütünlük (nav periyodunda)
    5. health            FDIR (HealthSupervisor)
    6. proposals         görev yöneticisi (MissionManager) + AC/SC önerileri
    7. rta               Simplex karar -> ValidatedCommand
    8. allocation        VehicleController (kontrol yasası + dağıtım)
+                        + üçlü FCC şerit oylaması (TriplexFlightComputer)
    9. actuators         gecikme, tepki, doyma, eyleyici arızaları
   10. dynamics          6-DOF integrasyon + yer teması; zaman burada ilerler
   11. power             elektrik yükü -> enerji yöneticisi
@@ -18,13 +20,13 @@ Her adım (tick) aşağıdaki SABİT sırayla çalışır (`TICK_ORDER`):
   13. logging           anlık görüntü kaydı
   14. metrics           metrik biriktirme
 
-Başlatma: PreflightSupervisor'ın 8 kontrolü geçmeden araç ARMED olamaz.
+Başlatma: PreflightSupervisor'ın kritik kontrolleri geçmeden araç ARMED olamaz.
 
-Yetki zinciri (değişmez): MissionGuidance (AC) yalnızca `Command` ÖNERİR;
-CommandValidator biçimsel olarak geçersiz öneriyi reddeder;
+Yetki zinciri (değişmez): MissionGuidance (AC) yalnızca `CommandProposal` ÖNERİR;
+CommandValidator geçersiz / bayat / uyumsuz / bilinmeyen öneriyi reddeder;
 RuntimeAssurance bunu `ValidatedCommand`'a çevirir; VehicleController
 yalnızca `ValidatedCommand` kabul eder. Eyleyicilere giden tek yol
-VehicleController -> ActuatorModel'dir.
+VehicleController -> TriplexFlightComputer (oylama) -> ActuatorModel'dir.
 
 Determinizm: tüm rastgelelik `numpy.random.SeedSequence(seed)`'ten türetilen
 alt üreteçlerden gelir; küresel rastgele durum kullanılmaz.
@@ -55,7 +57,8 @@ from ..nav.integrity import IntegrityMonitor
 from ..nav.providers import NavigationSystem
 from ..power.energy_manager import EnergyManager
 from ..power.reserve import LANDING_ENERGY_WH, ReserveMonitor
-from ..safety.command_validator import CommandValidator
+from ..safety.command_validator import CommandProposal, CommandValidator
+from ..sensing import ChannelSpec, SensorPipeline
 from ..safety.rta import Command, EnvelopeState, RuntimeAssurance, Source, ValidatedCommand
 from .actuators import ActuatorCommand, ActuatorModel, ActuatorState, rpm_from_output
 from .airdata import AirDataSystem
@@ -73,6 +76,7 @@ from .recorder import SimulationRecorder
 from .scenario import Scenario
 from .sensors import DEFAULT_POSITION_SOURCES, SensorModel, SensorSuite, SimulatedPositionProvider
 from .supervisor import SYSTEM_SEVERITY, SystemAssessment, SystemSupervisor
+from .triplex import TriplexFlightComputer
 from .vehicle_control import ControlInputs, HoverPlan, VehicleController
 
 log = logging.getLogger(__name__)
@@ -152,6 +156,10 @@ class SimulationEngine:
         self.rpm_sensor = SensorModel("RPM", np.full(self.n_m, 15.0), rngs[7])
         self.sensors = SensorSuite(pos_sensors + [baro, pitot, self.rpm_sensor])
         self.airdata = AirDataSystem(pitot, baro)
+        self.sensing = SensorPipeline(self._channel_specs(cfg, v))
+        self._raw: list = []
+        for s in self.sensors.sensors.values():
+            s.observers.append(self._raw.append)
         self.nav = NavigationSystem([SimulatedPositionProvider(s, self._truth_ne)
                                      for s in pos_sensors], IntegrityMonitor())
 
@@ -171,6 +179,7 @@ class SimulationEngine:
         self.trans = TransitionCoordinator()
         self.controller = VehicleController(v, sf, self.aero, self.prop)
         self.validator = CommandValidator()
+        self.fcc = TriplexFlightComputer()
         self.preflight = PreflightSupervisor()
         self.vhm = VehicleHealthModel()
         self.supervisor = SystemSupervisor()
@@ -178,10 +187,14 @@ class SimulationEngine:
         self.vehicle_health: VehicleHealth | None = None
         self.system: SystemAssessment | None = None
         self._proposal_rejected = False
+        self._proposal_seen = False
+        self._rejected_since: float | None = None
+        self._excluded: set[str] = set()
         self._unmet_timer = 0.0
         self.injector = FaultInjector(scenario.faults, {
             "actuator": self.act, "sensor": self.sensors, "link": self.link,
             "energy": EnergyFaultTarget(self.em), "controller": ControllerFaultTarget(self.guid),
+            "fcc": self.fcc,
         }, self.bus)
 
         # --- durum
@@ -260,7 +273,23 @@ class SimulationEngine:
             status, tuple(DEFAULT_POSITION_SOURCES), self.nav.min_sources_for_integrity,
             self.em.usable_energy_wh(), dist, m.cruise_speed_mps, sf.cruise_power_estimate_w,
             self.health.hover_margin, failed, self.link.update(0.0)[0], tuple(m.waypoints),
-            tuple(m.home_ne), m.takeoff_alt_m, sf, self.rta.soft, self.rta.hard)
+            tuple(m.home_ne), m.takeoff_alt_m, sf, self.rta.soft, self.rta.hard,
+            {l: self.fcc.heartbeat_ok(l) for l in ("A", "B", "C")}, self.rta.latched,
+            any(e["type"] == EventType.SIM_STARTED.value for e in self.recorder.events))
+
+    @staticmethod
+    def _channel_specs(cfg: Any, v: Any) -> dict[str, ChannelSpec]:
+        """Yazılım akla yatkınlık sınırları (gürültü düzeyine göre geniş; kalibrasyon değil)."""
+        nav_age = 2.5 * cfg.nav_period_s
+        tick_age = 5.0 * cfg.dt_s
+        pos = dict(lower=-1e5, upper=1e5, max_age_s=nav_age)
+        return {"GNSS": ChannelSpec(max_rate_per_s=150.0, **pos),
+                "VIO": ChannelSpec(max_rate_per_s=400.0, **pos),
+                "TRN": ChannelSpec(max_rate_per_s=700.0, **pos),
+                "MAGNAV": ChannelSpec(max_rate_per_s=1200.0, **pos),
+                "BARO": ChannelSpec(-500.0, 1e4, 200.0, tick_age),
+                "AIRSPEED": ChannelSpec(-5.0, 120.0, 200.0, tick_age),
+                "RPM": ChannelSpec(-1e3, 1.5 * v.rpm_max, float("inf"), tick_age)}
 
     def step(self) -> None:
         """Tek adım. Sayısal hata `sim_failed` olayıyla kaydedilip yeniden fırlatılır."""
@@ -286,12 +315,14 @@ class SimulationEngine:
         if self.tick % self.nav_every == 0:                                 # 4
             self._navigation()
         self._health()                                                      # 5
+        self._sense()
         self._mission_step()                                                # 6
-        ac, sc = self._proposals()
-        ac = self._validate_proposal(ac)
+        prop, sc = self._proposals()
+        ac = self._validate_proposal(prop)
         validated = self._rta(ac, sc)                                       # 7
         u = self.controller.compute(self._control_inputs(R, v_air_b, validated),   # 8
                                     self.plan, self.sc.mission.cruise_speed_mps)
+        u = self._vote(u)
         st = self.act.step(ActuatorCommand(u, self.t))                      # 9
         self._dynamics(st, envs)                                            # 10
         self.t = round(self.t + dt, 9)
@@ -356,6 +387,9 @@ class SimulationEngine:
                   "system_state": None if self.system is None else self.system.state.value,
                   "vehicle_health": None if self.vehicle_health is None
                   else self.vehicle_health.overall.value,
+                  "health_level": None if self.vehicle_health is None
+                  else self.vehicle_health.level.value,
+                  "fcc_lanes": {l: st.value for l, st in self.fcc.voter.states.items()},
                   "transition": None if self.trans_status is None else self.trans_status.phase.value})
         return s
 
@@ -411,6 +445,27 @@ class SimulationEngine:
             et = EventType.FDIR_WARNING if r.state is HealthState.DEGRADED else EventType.FDIR_FAILURE
             self._pub(et, r.component_id, component=r.component_id, **r.to_dict(),
                       monitor=self.health.details(r.component_id))
+        # FAILED (sağlık 0) eyleyici nominal dağıtımdan çıkarılır: nedenini kaydet.
+        for i, cid in enumerate(self.act.ids):
+            if self.health.health[i] <= 0.0 and cid not in self._excluded:
+                self._excluded.add(cid)
+                reason = (self.health.motors.reason[i] if i < self.n_m else "konum_artigi") \
+                    or "fdir_ariza"
+                self._pub(EventType.ACTUATOR_EXCLUDED, cid, component=cid, reason=reason,
+                          allocation_health=0.0, hover_margin_after=round(self.health.hover_margin, 4),
+                          monitor=self.health.details(cid))
+
+    def _sense(self) -> None:
+        """Ölçüm hattı: ham ölçümler -> doğrulama -> sağlık -> ölçüm yolu (salt gözlem)."""
+        raws = list(self._raw)
+        self._raw.clear()               # gözlemciler aynı listeye yazar: yerinde temizle
+        changes = [c for c in (self.sensing.process(r, self.t) for r in raws) if c is not None]
+        changes += self.sensing.check_freshness(self.t)
+        for c in changes:
+            last = self.sensing.bus.latest(c.source)
+            self._pub(EventType.SENSOR_HEALTH_CHANGED, c.source, component=f"sensor:{c.source}",
+                      previous=c.previous.value, state=c.state.value, reason=c.reason,
+                      measurement=None if last is None else last.to_dict())
 
     # ======================================================== 6. proposals
     def _mission_step(self) -> None:
@@ -492,7 +547,7 @@ class SimulationEngine:
         self.trans.start_back(self.t, self.alt_meas, math.degrees(pitch))
         self._pub(EventType.TRANSITION_STARTED, "back", direction="back")
 
-    def _proposals(self) -> tuple[Command | None, Command | None]:
+    def _proposals(self) -> tuple[CommandProposal | None, Command | None]:
         """Gelişmiş kontrolcü (AC) ve güvenlik kontrolcüsü (SC) ÖNERİLERİ."""
         mode, m = self.mode, self.sc.mission
         pos, vel = self.nav_sol.position_ned, self.x[3:6]
@@ -507,13 +562,21 @@ class SimulationEngine:
         else:
             ac = self.guid.to_point(pos, vel, heading, self.mission.guidance_target(mode),
                                     m.cruise_alt_m, m.cruise_speed_mps, self.airspeed)
-        return ac, sc
+        cmd, ts = self.guid.stamp(ac, self.t)
+        return CommandProposal(cmd, "mission_guidance", ts, mode.name), sc
 
-    def _validate_proposal(self, ac: Command | None) -> Command | None:
-        """YZ önerisi -> CommandValidator. Geçersiz öneri RTA'ya ulaşmaz."""
-        if ac is None:
+    def _validate_proposal(self, prop: CommandProposal | None) -> Command | None:
+        """Öneri -> CommandValidator (şema, tazelik, mod, sınır, yetki).
+        Geçersiz öneri RTA'ya ulaşmaz."""
+        if prop is None:
+            self._proposal_seen = False
             return None
-        res = self.validator.validate(ac)
+        self._proposal_seen = True
+        res = self.validator.validate(prop, now=self.t, mode=self.mode.name)
+        if res.accepted:
+            self._rejected_since = None
+        elif self._rejected_since is None:
+            self._rejected_since = self.t
         if not res.accepted and not self._proposal_rejected:
             self._pub(EventType.COMMAND_REJECTED, ",".join(res.reasons),
                       component="command_validator", **res.to_dict())
@@ -553,6 +616,17 @@ class SimulationEngine:
         return d.validated
 
     # ========================================================= 8. control
+    def _vote(self, u: np.ndarray) -> np.ndarray:
+        """Üçlü FCC: şerit çıktıları -> karşılaştırıcı -> oylayıcı -> yalıtım."""
+        res = self.fcc.step(u, self.t)
+        for c in res.changes:
+            self._pub(EventType.FCC_LANE_STATE_CHANGED, f"{c.lane}:{c.state.value}",
+                      component=f"fcc:{c.lane}", configuration=res.configuration,
+                      voters=list(res.voters), disagreement=res.disagreement, **c.to_dict())
+        if res.output is not None:
+            return res.output
+        return self.fcc.last_output if self.fcc.last_output is not None else np.zeros_like(u)
+
     def _control_inputs(self, R: np.ndarray, v_air_b: np.ndarray,
                         validated: ValidatedCommand | None) -> ControlInputs:
         return ControlInputs(
@@ -644,7 +718,10 @@ class SimulationEngine:
             self.em.usable_energy_wh(include_reserve=True) >= LANDING_ENERGY_WH
         ctx.nav_integrity_ok = self.nav_sol.integrity_ok
         ctx.hover_feasible = self.health.hover_margin > sf.hover_margin_min
-        ctx.controllable = self.controller.controllable
+        ctx.controllable = self.controller.controllable and self.fcc.has_output
+        ctx.link_ok, ctx.rta_latched = self._link_up, self.rta.latched
+        ctx.vehicle_health_level = (self.vehicle_health.level.value
+                                    if self.vehicle_health is not None else "unknown")
         d = self.cm.evaluate_detailed(self.fsm, ctx)
         if d is not None and d.accepted:
             self._pub(EventType.CONTINGENCY, d.trigger, component="contingency_manager",
@@ -664,12 +741,16 @@ class SimulationEngine:
             energy_warning=self.reserve.active,
             unmet_power_w=(0.0 if sp is None or self._unmet_timer < _UNMET_POWER_PERSIST_S
                            else sp.unmet_w),
-            link_up=self._link_up, controllable=ctx.controllable)
+            link_up=self._link_up, controllable=ctx.controllable,
+            sensor_states=self.sensing.health(),
+            lane_states=dict(self.fcc.voter.states),
+            proposal_ok=(not self._proposal_rejected) if self._proposal_seen else True,
+            proposal_rejected_s=0.0 if self._rejected_since is None else self.t - self._rejected_since,
+            motor_ids=frozenset(self.act.ids[:self.n_m]))
         if self.vehicle_health is None or vh.signature() != self.vehicle_health.signature():
-            self._pub(EventType.VEHICLE_HEALTH_CHANGED, vh.overall.value, component="vehicle_health_model",
-                      reason=";".join(f"{d.domain.value}:{d.reason}" for d in vh.domains
-                                      if d.state.value != "nominal") or "nominal",
-                      **vh.to_dict())
+            self._pub(EventType.VEHICLE_HEALTH_CHANGED, vh.level.value,
+                      component="vehicle_health_manager",
+                      reason=";".join(vh.reasons) or "nominal", **vh.to_dict())
         self.vehicle_health = vh
         last = next((r for r in reversed(self.fsm.records) if r.accepted), None)
         sa = self.supervisor.assess(

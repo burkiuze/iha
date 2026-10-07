@@ -1,38 +1,73 @@
-"""Araç sağlık modeli (Vehicle Health Model): FDIR omurgasının birleşim noktası.
+"""Vehicle Health Manager: FDIR omurgasının birleşim noktası.
 
-Alan (domain) bazında sağlık durumu üretir ve en kötüsünü araç durumu
-olarak birleştirir. Önem sırası: NOMINAL < DEGRADED < UNKNOWN < FAILED.
+Sekiz alan FDIR raporu (sensör, navigasyon, FCC, motor, eyleyici, enerji,
+haberleşme, görev bilgisayarı) + türetilmiş kontrol otoritesi alanı
+birleştirilir:
 
-UNKNOWN hiçbir zaman NOMINAL sayılmaz; DEGRADED'den daha ağır kabul edilir
+  * alan durumları: NOMINAL < DEGRADED < UNKNOWN < FAILED (önem sırası)
+  * araç seviyesi (`VehicleHealthLevel`) + gerekçeler (reasons[]):
+
+      CRITICAL     kontrol kaybı, askı yedekliliği yok, hiç FCC şeridi yok
+      CONTINGENCY  diğer FAILED alanlar (nav bütünlüğü, C2, güç, tek şerit,
+                   görev bilgisayarı, yüzeylerin tamamı, geri dönüşsüz sensör)
+      UNKNOWN      herhangi bir alan bilinmiyor
+      DEGRADED     herhangi bir alan bozulmuş
+      NOMINAL      hepsi nominal
+
+UNKNOWN hiçbir zaman NOMINAL kabul edilmez; DEGRADED'den daha ağırdır
 (bilinmeyen bir işlevin çalıştığına güvenilmez).
 
-Simülasyonda modellenmeyen alanlar (ör. uçuş bilgisayarı şeritleri)
-bu modele dahil EDİLMEZ; `NOT_MODELED` listesinde açıkça belirtilir,
-böylece "modellenmedi" ile "sağlıklı" karıştırılmaz.
+Model yalnızca DEĞERLENDİRİR: mod değiştirmez, eyleyici sürmez.
 """
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from enum import Enum
 
 from ..core.types import HealthState, NavigationSolution
+from .lanes import LaneState
+from .reports import (FdirDomain, FdirReport, actuator_fdir, communication_fdir, energy_fdir,
+                      fcc_fdir, legacy_sensor_fdir, mission_computer_fdir, motor_fdir,
+                      navigation_fdir, sensor_fdir)
 
 SEVERITY = {HealthState.NOMINAL: 0, HealthState.DEGRADED: 1, HealthState.UNKNOWN: 2,
             HealthState.FAILED: 3}
 
 
 class Domain(str, Enum):
-    ACTUATORS = "actuators"
     SENSORS = "sensors"
     NAVIGATION = "navigation"
-    POWER = "power"
+    FCC = "fcc"
+    MOTORS = "motors"
+    ACTUATORS = "actuators"          # kontrol yüzeyleri (elevonlar)
+    ENERGY = "energy"
+    POWER = "energy"                 # geriye dönük uyumlu takma ad
     COMMUNICATION = "communication"
-    CONTROL = "control"
+    MISSION_COMPUTER = "mission_computer"
+    CONTROL = "control"              # türetilmiş: kontrol otoritesi
 
 
-NOT_MODELED = ("computer_lanes",)
+class VehicleHealthLevel(str, Enum):
+    NOMINAL = "nominal"
+    DEGRADED = "degraded"
+    UNKNOWN = "unknown"
+    CONTINGENCY = "contingency"
+    CRITICAL = "critical"
+
+
+LEVEL_SEVERITY = {VehicleHealthLevel.NOMINAL: 0, VehicleHealthLevel.DEGRADED: 1,
+                  VehicleHealthLevel.UNKNOWN: 2, VehicleHealthLevel.CONTINGENCY: 3,
+                  VehicleHealthLevel.CRITICAL: 4}
+
+_FDIR_TO_DOMAIN = {FdirDomain.SENSOR: Domain.SENSORS, FdirDomain.NAVIGATION: Domain.NAVIGATION,
+                   FdirDomain.FCC: Domain.FCC, FdirDomain.MOTOR: Domain.MOTORS,
+                   FdirDomain.ACTUATOR: Domain.ACTUATORS, FdirDomain.ENERGY: Domain.ENERGY,
+                   FdirDomain.COMMUNICATION: Domain.COMMUNICATION,
+                   FdirDomain.MISSION_COMPUTER: Domain.MISSION_COMPUTER}
+
+# Simülasyonda hiç modellenmeyen alanlar ("modellenmedi" != "sağlıklı").
+NOT_MODELED: tuple[str, ...] = ("thermal", "imu_redundancy")
 
 
 @dataclass(frozen=True)
@@ -51,15 +86,20 @@ class DomainHealth:
 class VehicleHealth:
     overall: HealthState
     domains: tuple[DomainHealth, ...]
+    level: VehicleHealthLevel = VehicleHealthLevel.UNKNOWN
+    reasons: tuple[str, ...] = ()
+    reports: tuple[FdirReport, ...] = ()
 
     def domain(self, d: Domain) -> DomainHealth:
         return next(x for x in self.domains if x.domain is d)
 
     def signature(self) -> tuple:
-        return (self.overall,) + tuple((d.domain, d.state) for d in self.domains)
+        return (self.overall, self.level) + tuple((d.domain, d.state, d.reason) for d in self.domains)
 
     def to_dict(self) -> dict:
-        return {"overall": self.overall.value, "domains": [d.to_dict() for d in self.domains],
+        return {"overall": self.overall.value, "level": self.level.value,
+                "reasons": list(self.reasons), "domains": [d.to_dict() for d in self.domains],
+                "fdir_reports": [r.to_dict() for r in self.reports],
                 "not_modeled": list(NOT_MODELED)}
 
 
@@ -67,66 +107,55 @@ def worst(states: list[HealthState]) -> HealthState:
     return max(states, key=SEVERITY.__getitem__) if states else HealthState.UNKNOWN
 
 
+def classify(domains: tuple[DomainHealth, ...]) -> tuple[VehicleHealthLevel, tuple[str, ...]]:
+    """Alan durumlarından araç seviyesi + gerekçeler."""
+    by = {d.domain: d for d in domains}
+    reasons = tuple(f"{d.domain.value}:{d.state.value}:{d.reason}" for d in domains
+                    if d.state is not HealthState.NOMINAL)
+    failed = {d.domain for d in domains if d.state is HealthState.FAILED}
+    critical = (Domain.CONTROL in failed or Domain.MOTORS in failed
+                or (Domain.FCC in failed and by[Domain.FCC].reason == "serit_yok"))
+    if critical:
+        return VehicleHealthLevel.CRITICAL, reasons
+    if failed:
+        return VehicleHealthLevel.CONTINGENCY, reasons
+    if any(d.state is HealthState.UNKNOWN for d in domains):
+        return VehicleHealthLevel.UNKNOWN, reasons
+    if reasons:
+        return VehicleHealthLevel.DEGRADED, reasons
+    return VehicleHealthLevel.NOMINAL, ()
+
+
 class VehicleHealthModel:
+    """Vehicle Health Manager (geriye dönük uyumlu ad)."""
+
     def assess(self, *, actuator_states: dict[str, HealthState], hover_feasible: bool,
                airborne: bool, degraded_sensors: list[str], nav: NavigationSolution | None,
                nav_initialized: bool, energy_health: float, usable_energy_wh: float,
                energy_warning: bool, unmet_power_w: float, link_up: bool,
-               controllable: bool) -> VehicleHealth:
-        d = [self._actuators(actuator_states, hover_feasible, airborne),
-             self._sensors(degraded_sensors),
-             self._navigation(nav, nav_initialized),
-             self._power(energy_health, usable_energy_wh, energy_warning, unmet_power_w),
-             DomainHealth(Domain.COMMUNICATION,
-                          HealthState.NOMINAL if link_up else HealthState.FAILED,
-                          "c2_bagli" if link_up else "c2_yok"),
-             self._control(controllable, hover_feasible)]
-        return VehicleHealth(worst([x.state for x in d]), tuple(d))
-
-    @staticmethod
-    def _actuators(states: dict[str, HealthState], hover_ok: bool, airborne: bool) -> DomainHealth:
-        failed = tuple(k for k, s in states.items() if s is HealthState.FAILED)
-        degraded = tuple(k for k, s in states.items() if s is HealthState.DEGRADED)
-        unknown = tuple(k for k, s in states.items() if s is HealthState.UNKNOWN)
-        if failed and not hover_ok:
-            return DomainHealth(Domain.ACTUATORS, HealthState.FAILED, "yedeklilik_yetersiz", failed)
-        if unknown and airborne:
-            return DomainHealth(Domain.ACTUATORS, HealthState.UNKNOWN, "gozlenmemis_eyleyici", unknown)
-        if failed or degraded:
-            return DomainHealth(Domain.ACTUATORS, HealthState.DEGRADED,
-                                "ariza_yedeklilikle_tolere" if failed else "verim_kaybi",
-                                failed + degraded)
-        return DomainHealth(Domain.ACTUATORS, HealthState.NOMINAL, "nominal")
-
-    @staticmethod
-    def _sensors(degraded: list[str]) -> DomainHealth:
-        if degraded:
-            return DomainHealth(Domain.SENSORS, HealthState.DEGRADED, "olcum_yok_geri_donus_kaynagi",
-                                tuple(sorted(degraded)))
-        return DomainHealth(Domain.SENSORS, HealthState.NOMINAL, "nominal")
-
-    @staticmethod
-    def _navigation(nav: NavigationSolution | None, initialized: bool) -> DomainHealth:
-        if nav is None or not initialized:
-            return DomainHealth(Domain.NAVIGATION, HealthState.UNKNOWN, "cozum_yok")
-        if not nav.integrity_ok:
-            return DomainHealth(Domain.NAVIGATION, HealthState.FAILED, "butunluk_yok",
-                                tuple(nav.sources_used))
-        lost = tuple(nav.sources_rejected) + tuple(nav.sources_unavailable)
-        if lost:
-            return DomainHealth(Domain.NAVIGATION, HealthState.DEGRADED, "kaynak_kaybi", lost)
-        return DomainHealth(Domain.NAVIGATION, HealthState.NOMINAL, "nominal")
-
-    @staticmethod
-    def _power(health: float, usable_wh: float, warning: bool, unmet_w: float) -> DomainHealth:
-        if not (math.isfinite(usable_wh) and math.isfinite(health)):
-            return DomainHealth(Domain.POWER, HealthState.UNKNOWN, "enerji_kestirimi_yok")
-        if unmet_w > 1e-6:
-            return DomainHealth(Domain.POWER, HealthState.FAILED, "guc_talebi_karsilanamiyor")
-        if warning or health < 1.0:
-            return DomainHealth(Domain.POWER, HealthState.DEGRADED,
-                                "rezerv_uyarisi" if warning else "kaynak_bozunumu")
-        return DomainHealth(Domain.POWER, HealthState.NOMINAL, "nominal")
+               controllable: bool, sensor_states: dict[str, HealthState] | None = None,
+               lane_states: dict[str, LaneState] | None = None,
+               proposal_ok: bool | None = None, proposal_rejected_s: float = 0.0,
+               motor_ids: frozenset[str] | None = None) -> VehicleHealth:
+        is_motor = (lambda k: k in motor_ids) if motor_ids is not None else (lambda k: k.startswith("M"))
+        motors = {k: s for k, s in actuator_states.items() if is_motor(k)}
+        surfaces = {k: s for k, s in actuator_states.items() if not is_motor(k)}
+        reports = (
+            sensor_fdir(sensor_states, airborne) if sensor_states is not None
+            else legacy_sensor_fdir(degraded_sensors),
+            navigation_fdir(nav, nav_initialized),
+            fcc_fdir(lane_states),
+            motor_fdir(motors, hover_feasible, airborne),
+            actuator_fdir(surfaces),
+            energy_fdir(energy_health, usable_energy_wh, energy_warning, unmet_power_w),
+            communication_fdir(link_up),
+            mission_computer_fdir(proposal_ok, proposal_rejected_s),
+        )
+        domains = tuple(DomainHealth(_FDIR_TO_DOMAIN[r.domain], r.health_state, r.reason,
+                                     r.fault_isolated) for r in reports)
+        domains += (self._control(controllable, hover_feasible),)
+        level, reasons = classify(domains)
+        return VehicleHealth(worst([d.state for d in domains]), domains, level, reasons, reports)
 
     @staticmethod
     def _control(controllable: bool, hover_ok: bool) -> DomainHealth:
@@ -135,3 +164,6 @@ class VehicleHealthModel:
         if not hover_ok:
             return DomainHealth(Domain.CONTROL, HealthState.DEGRADED, "aski_otoritesi_yok")
         return DomainHealth(Domain.CONTROL, HealthState.NOMINAL, "nominal")
+
+
+VehicleHealthManager = VehicleHealthModel

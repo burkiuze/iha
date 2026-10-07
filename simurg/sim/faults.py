@@ -6,7 +6,7 @@
     FaultTarget    : arızayı uygulayan alt sistem arayüzü (Protocol)
 
 Hedef adlandırma: "<sistem>:<bileşen>" — örn. "actuator:M2U", "sensor:GNSS",
-"link:c2", "energy:fuel_cell", "controller:advanced".
+"link:c2", "energy:fuel_cell", "controller:advanced", "fcc:B".
 
 Arızalar yalnızca simülasyondaki modelleri bozar (yazılım doğrulaması için);
 gerçek donanıma uygulanacak bir mekanizma içermez.
@@ -36,7 +36,9 @@ class FaultKind(str, Enum):
     ENERGY_FC_DEGRADED = "energy_fc_degraded"
     ENERGY_BATTERY_FADE = "energy_battery_fade"
     ENERGY_POWER_LIMIT = "energy_power_limit"
-    CONTROLLER_FAULT = "controller_fault"     # gelişmiş kontrolcü hatalı öneri üretir
+    CONTROLLER_FAULT = "controller_fault"     # gelişmiş kontrolcü hatalı / bayat öneri üretir
+    FCC_LANE_UNAVAILABLE = "fcc_lane_unavailable"  # şerit kalp atışı yok
+    FCC_LANE_DIVERGENCE = "fcc_lane_divergence"    # şerit çıktısı diğerlerinden sapar
 
 
 _SYSTEM_OF_KIND = {
@@ -45,7 +47,8 @@ _SYSTEM_OF_KIND = {
     FaultKind.ACTUATOR_STUCK: "actuator", FaultKind.ACTUATOR_OFFLINE: "actuator",
     FaultKind.LINK_LOSS: "link", FaultKind.ENERGY_FC_DEGRADED: "energy",
     FaultKind.ENERGY_BATTERY_FADE: "energy", FaultKind.ENERGY_POWER_LIMIT: "energy",
-    FaultKind.CONTROLLER_FAULT: "controller",
+    FaultKind.CONTROLLER_FAULT: "controller", FaultKind.FCC_LANE_UNAVAILABLE: "fcc",
+    FaultKind.FCC_LANE_DIVERGENCE: "fcc",
 }
 
 
@@ -177,16 +180,25 @@ class EnergyFaultTarget:
 
 
 class ControllerFaultTarget:
-    """Gelişmiş kontrolcünün hatalı (zarf dışı) öneri üretmesini taklit eder.
+    """Gelişmiş kontrolcünün / görev bilgisayarının hatalı öneri üretmesini taklit eder.
 
-    Amaç RTA'nın koruyucu davranışını doğrulamaktır; şiddet 1.0 -> 75° yatış.
+    Varsayılan: zarf dışı yatış (şiddet 1.0 -> 75°); RTA'nın koruyucu
+    davranışını doğrular. `params={"mode": "stale"}`: öneri dondurulur ve
+    eski zaman damgasıyla tekrarlanır (görev bilgisayarı takılması);
+    komut doğrulayıcının tazelik denetimini doğrular.
     """
 
     def __init__(self, guidance: Any) -> None:
         self.g = guidance
 
     def apply_fault(self, fault: Fault) -> None:
-        self.g.fault_bank_deg = float(fault.params.get("bank_deg", 75.0 * fault.severity))
+        if fault.params.get("mode") == "stale":
+            self.g.fault_stale = True
+        else:
+            self.g.fault_bank_deg = float(fault.params.get("bank_deg", 75.0 * fault.severity))
 
     def clear_fault(self, fault: Fault) -> None:
-        self.g.fault_bank_deg = None
+        if fault.params.get("mode") == "stale":
+            self.g.fault_stale = False
+        else:
+            self.g.fault_bank_deg = None

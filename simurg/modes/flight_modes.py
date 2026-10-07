@@ -43,6 +43,11 @@ class Context:
     hover_feasible: bool = True       # kontrol dağıtıcısının hover marjı > 1
     controllable: bool = True         # RTA + FDIR: araç kontrol edilebilir mi
     landed: bool = True
+    # Kayıt / açıklanabilirlik girdileri (kural tablosu bunları henüz tetikleyici
+    # olarak kullanmaz; kararla birlikte kaydedilir):
+    vehicle_health_level: str = "unknown"
+    rta_latched: bool = False
+    link_ok: bool = True
 
 
 Guard = Callable[[Context], bool]
@@ -188,19 +193,35 @@ CONTINGENCY_RULES: tuple[ContingencyRule, ...] = (
 )
 
 
+CONTINGENCY_INPUTS = ("vehicle_health_level", "nav_integrity_ok", "rth_energy_ok",
+                      "land_energy_ok", "hover_feasible", "controllable", "link_ok",
+                      "link_lost_s", "rta_latched")
+
+
 @dataclass(frozen=True)
 class ContingencyDecision:
+    """Önerilen güvenli mod + gerekçe + öncelik + zaman damgası + girdi görüntüsü."""
     requested_mode: Mode | None
     reason: str
     priority: int
     trigger: str
     accepted: bool
     source_mode: Mode
+    timestamp: float = float("nan")
+    inputs: tuple[tuple[str, object], ...] = ()
+
+    @property
+    def recommended_safe_mode(self) -> Mode | None:
+        return self.requested_mode
 
     def to_dict(self) -> dict:
         return {"requested_mode": None if self.requested_mode is None else self.requested_mode.name,
+                "recommended_safe_mode": None if self.requested_mode is None
+                else self.requested_mode.name,
                 "reason": self.reason, "priority": self.priority, "trigger": self.trigger,
-                "accepted": self.accepted, "source_mode": self.source_mode.name}
+                "accepted": self.accepted, "source_mode": self.source_mode.name,
+                "timestamp": None if math.isnan(self.timestamp) else round(self.timestamp, 6),
+                "inputs": dict(self.inputs)}
 
 
 class ContingencyManager:
@@ -222,13 +243,18 @@ class ContingencyManager:
 
     def evaluate_detailed(self, fsm: FlightModeMachine, ctx: Context) -> ContingencyDecision | None:
         m = fsm.mode
+        t = fsm.clock() if fsm.clock is not None else float("nan")
+        inputs = tuple((k, getattr(ctx, k)) for k in CONTINGENCY_INPUTS)
         for r in self.rules:
             if m not in r.applies_in or not r.condition(ctx):
                 continue
             if r.target is None:
-                return ContingencyDecision(None, r.description, r.priority, r.trigger, False, m)
+                return ContingencyDecision(None, r.description, r.priority, r.trigger, False, m,
+                                           t, inputs)
+            # Mod değişimi YALNIZCA Flight Mode Machine üzerinden (koruma koşullarıyla).
             ok = fsm.request(r.target, ctx, r.trigger)
-            return ContingencyDecision(r.target, r.description, r.priority, r.trigger, ok, m)
+            return ContingencyDecision(r.target, r.description, r.priority, r.trigger, ok, m,
+                                       t, inputs)
         return None
 
     def evaluate(self, fsm: FlightModeMachine, ctx: Context) -> Mode | None:

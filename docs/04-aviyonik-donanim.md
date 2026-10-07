@@ -21,6 +21,11 @@ programlama). C, A ve B'nin çıkışlarını karşılaştırır ve yalnızca ba
 biçimsel olarak doğrulanmış kurallar uygular.
 
 ### 1.1 Komuta-monitör çalışma
+
+> **Uygulama durumu (v0.3):** Şerit karşılaştırma, oylama, bekçi köpeği ve
+> yalıtım mantığı simülasyonda çalışır (`simurg/fdir/lanes.py`,
+> `simurg/sim/triplex.py`); şeritler aynı hesabın kopyasıdır ve farklı
+> mimarili uygulamalar PLANNED'dır. Ayrıntı: [mimari/03](mimari/03-triplex-fcc.md).
 ```mermaid
 sequenceDiagram
   participant A as Şerit A

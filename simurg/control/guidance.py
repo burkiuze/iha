@@ -45,6 +45,18 @@ class MissionGuidance:
     def __init__(self, gains: GuidanceGains | None = None) -> None:
         self.g = gains or GuidanceGains()
         self.fault_bank_deg: float | None = None   # arıza enjeksiyonu kancası
+        self.fault_stale = False                    # arıza: öneri donar (eski zaman damgası)
+        self._frozen: tuple[Command, float] | None = None
+
+    def stamp(self, cmd: Command, t: float) -> tuple[Command, float]:
+        """Öneriye üretim zaman damgası verir. `fault_stale` iken ilk dondurulan
+        öneri eski damgasıyla tekrar edilir (doğrulayıcı bayat olarak reddetmeli)."""
+        if not self.fault_stale:
+            self._frozen = None
+            return cmd, t
+        if self._frozen is None:
+            self._frozen = (cmd, t)
+        return self._frozen
 
     def pitch_for_altitude(self, alt: float, climb: float, alt_cmd: float,
                            limit: float | None = None, airspeed: float | None = None,

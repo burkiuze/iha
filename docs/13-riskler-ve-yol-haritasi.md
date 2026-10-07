@@ -65,6 +65,14 @@ gantt
 - [x] Olay yolu, JSON kayıt şeması, tekrar oynatma, metrikler, Monte Carlo, CLI
 - [x] Enerji modeline bozunum kancası (yaşlanma/sıcaklık modelleri için)
 
+**v0.3'te tamamlananlar** (bkz. [15](15-sistem-mimarisi.md), [mimari/](mimari/)):
+
+- [x] Sensör ölçüm hattı (zaman damgası, doğrulama, akla yatkınlık, kanal sağlığı, ölçüm yolu)
+- [x] Aşamalı komut doğrulayıcı (şema, tazelik, mod uyumu, sınır, yetki)
+- [x] Üçlü FCC şerit oylaması ve yalıtımı (simülasyon soyutlaması; şerit arızası enjeksiyonu)
+- [x] 8 alan FDIR raporu + Vehicle Health Manager seviyeleri; 11 kontrollü uçuş öncesi denetçi
+- [x] Uçuş veri kaydedici kanalları ve `why_*` açıklamaları; 10 arıza zinciri ve mimari-kod denetimi
+
 **Sıradaki adımlar:**
 
 1. RTA'nın kaba kinematik kestiricisini 6-DOF modeliyle karşılaştırıp

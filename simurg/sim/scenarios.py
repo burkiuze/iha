@@ -177,11 +177,58 @@ def loss_of_control(seed: int = 0) -> Scenario:
         tags=("contingency",))
 
 
+def fcc_lane_divergence(seed: int = 0) -> Scenario:
+    """FCC şerit B çıktısı t=50 s'de sapar -> çapraz karşılaştırma -> yalıtım; görev sürer."""
+    return Scenario(
+        "fcc_lane_divergence", "Şerit B çıktısı kalıcı olarak sapar; oylayıcı B'yi yalıtır.",
+        duration_s=260.0, seed=seed, mission=SHORT_MISSION,
+        faults=FaultSchedule((Fault("F1", FaultKind.FCC_LANE_DIVERGENCE, "fcc:B", 50.0,
+                                    params={"offset": 0.3}, description="şerit B sapması"),)),
+        expectations=Expectations(
+            required_events=(E.FCC_LANE_STATE_CHANGED, E.VEHICLE_HEALTH_CHANGED,
+                             E.MISSION_COMPLETE),
+            final_modes=LANDED, mission_completed=True, max_rta_interventions=0),
+        tags=("fcc", "redundancy"))
+
+
+def fcc_lane_loss(seed: int = 0) -> Scenario:
+    """FCC şerit A kalp atışı t=40 s'de kesilir -> bekçi köpeği -> FAILED; ikili mod."""
+    return Scenario(
+        "fcc_lane_loss", "Şerit A kullanılamaz hâle gelir; B + C ile ikili modda devam.",
+        duration_s=260.0, seed=seed, mission=SHORT_MISSION,
+        faults=FaultSchedule((Fault("F1", FaultKind.FCC_LANE_UNAVAILABLE, "fcc:A", 40.0,
+                                    description="şerit A kalp atışı yok"),)),
+        expectations=Expectations(
+            required_events=(E.FCC_LANE_STATE_CHANGED, E.MISSION_COMPLETE),
+            final_modes=LANDED, mission_completed=True, max_rta_interventions=0),
+        tags=("fcc", "redundancy"))
+
+
+def mission_computer_failure(seed: int = 0) -> Scenario:
+    """Görev bilgisayarı önerisi t=45 s'de 6 s donar (bayat zaman damgası).
+
+    Beklenen: doğrulayıcı bayat öneriyi RTA'ya ulaştırmaz, o sürede güvenlik
+    kontrolcüsü yetkilidir; öneri akışı düzelince görev tamamlanır.
+    """
+    return Scenario(
+        "mission_computer_failure", "Görev bilgisayarı önerisi 6 s donar; bayat öneriler reddedilir.",
+        duration_s=260.0, seed=seed, mission=SHORT_MISSION,
+        faults=FaultSchedule((Fault("F1", FaultKind.CONTROLLER_FAULT, "controller:advanced", 45.0,
+                                    6.0, params={"mode": "stale"},
+                                    description="görev bilgisayarı takıldı"),)),
+        expectations=Expectations(
+            required_events=(E.COMMAND_REJECTED, E.COMMAND_ACCEPTED, E.MISSION_COMPLETE),
+            forbidden_events=(E.IMPACT, E.RTA_LATCHED), final_modes=LANDED,
+            mission_completed=True),
+        tags=("mission_computer", "command_validation"))
+
+
 SCENARIOS: dict[str, Callable[[int], Scenario]] = {
     f.__name__: f for f in (nominal, nav_source_loss, nav_integrity_loss,
                             single_actuator_degradation, communication_loss,
                             energy_reserve_warning, rta_intervention, transition_abort,
-                            combined_degraded, hover_capability_loss, loss_of_control)
+                            combined_degraded, hover_capability_loss, loss_of_control,
+                            fcc_lane_divergence, fcc_lane_loss, mission_computer_failure)
 }
 
 

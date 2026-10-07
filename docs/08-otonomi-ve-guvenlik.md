@@ -163,6 +163,14 @@ ESC telemetrisi → MotorHealthMonitor → sağlık vektörü
 
 ## 6. Güvenlik değişmezleri (kodla zorlanır)
 
+> **v0.3:** Öneri artık RTA'dan önce aşamalı **Command Validator**'dan geçer
+> (şema → tazelik → mod uyumu → sınır → yetki); FDIR sekiz alanda standart
+> rapor üretir ve **Vehicle Health Manager** NOMINAL / DEGRADED /
+> CONTINGENCY / CRITICAL / UNKNOWN seviyesine birleştirir; üçlü FCC şerit
+> oylaması simülasyona bağlıdır. Mimari düzeydeki değişmez → test eşlemesi ve
+> mimari-kod denetimi: [15 §8–§9](15-sistem-mimarisi.md), arıza zincirleri:
+> [mimari/08](mimari/08-ariza-acil-durum.md).
+
 Aşağıdaki kurallar yalnızca doküman değildir; her biri
 `tests/test_safety_invariants.py` (ve belirtilen diğer testler) içinde
 adıyla doğrulanır.

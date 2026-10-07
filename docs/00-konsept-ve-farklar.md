@@ -131,4 +131,5 @@ flowchart TB
 | 12 | [Doğrulama ve sertifikasyon](12-dogrulama-ve-sertifikasyon.md) | Test piramidi, SORA, DO-178C |
 | 13 | [Riskler ve yol haritası](13-riskler-ve-yol-haritasi.md) | Teknik riskler, fazlar |
 | 14 | [Simülasyon ve dijital ikiz](14-simulasyon-ve-dijital-ikiz.md) | 6-DOF çekirdek, senaryolar, arıza enjeksiyonu, kayıt, Monte Carlo |
-| 15 | [Ayrıntılı sistem mimarisi](15-sistem-mimarisi.md) | 23 alt sistem / 236 blok, IMPLEMENTED·PARTIAL·PLANNED durumu, üretilmiş diyagram ve bileşen matrisi |
+| 15 | [Ayrıntılı sistem mimarisi](15-sistem-mimarisi.md) | Master system architecture: 26 alt sistem / 236 blok, IMPLEMENTED·PARTIAL·UNVALIDATED·PLANNED, arıza akışı, mimari-kod denetimi |
+| 15.x | [Alt sistem mimarileri](mimari/) | Sensor+Nav, GNC+RTA, Triplex FCC, FDIR+Health, Power, Allocation, Comm, Failure/Contingency, Time/Bus/Recorder, Digital Twin, Mission Computer |
